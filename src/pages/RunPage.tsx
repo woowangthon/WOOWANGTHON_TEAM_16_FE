@@ -12,10 +12,11 @@ import Timeline from "../components/Timeline";
 import TopBar from "../components/TopBar";
 import { Button, CopyButton, Notice } from "../components/ui";
 import { SERVER_COMMAND, helperCommand } from "../lib/collector";
-import { CAL_RECOMMENDED_S, GOAL_REQUIRED, HOLD_S, SETTLE_S, WARMUP_S, calibrationIssue, goalCounts, goalTotal } from "../lib/protocol";
+import { CAL_RECOMMENDED_S, GOAL_REQUIRED, HOLD_S, SETTLE_S, WARMUP_S, calibrationIssue, calibrationNote, goalCounts, goalTotal } from "../lib/protocol";
 import { receiverRows, type RxRow } from "../lib/receivers";
 import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { ensureSite, findSite } from "../lib/site";
+import { rangeText } from "../lib/ranges";
 import { ago, clock, duration } from "../lib/time";
 import { useLive, useTruthMap } from "../state/live";
 import { useSession } from "../state/session";
@@ -68,6 +69,14 @@ export default function RunPage() {
   const notCalibrated = rxNodes.filter((n) => receivingNames.has(n.name) && !n.calibrated);
   const calTotal = cal ? Math.max(1, (Date.parse(cal.ends_at) - Date.parse(cal.started_at)) / 1000) : 1;
   const calLeft = calRunning && cal ? Math.max(0, (Date.parse(cal.ends_at) - now) / 1000) : 0;
+  // 이 노트북 백엔드는 보정 마무리가 두 번 겹치면 결과 기록만 '실패 · 프레임 0'으로 덮어쓴다(기준선은 저장됨).
+  // 결과가 모두 프레임 0인데 수신기가 보정됨이면 실패로 보지 않는다.
+  const resultOverwritten =
+    !!cal &&
+    cal.status === "failed" &&
+    !!cal.result &&
+    Object.values(cal.result).every((r) => !r.ok && (r.frames ?? 0) === 0) &&
+    rxNodes.some((n) => n.calibrated && !n.restarted_since_calibration);
 
   const incident = state?.incident.status === "active" ? state.incident : building?.active_incident ?? null;
   const detecting = !!incident && incident.status === "active";
@@ -86,7 +95,8 @@ export default function RunPage() {
   const firstOpen = done.findIndex((d) => !d);
   const current = firstOpen === -1 ? 6 : firstOpen + 1;
   const doneCount = done.filter(Boolean).length;
-  const warn4 = restarted.length > 0 || cal?.status === "failed" || (detecting && !done[3]) || calIssues.length > 0;
+  const warn4 =
+    restarted.length > 0 || (cal?.status === "failed" && !resultOverwritten) || (detecting && !done[3]) || calIssues.length > 0;
 
   const statusOf = (n: number): StepStatus => {
     if (mock || replaying) return n <= 5 ? "skipped" : "open";
@@ -223,7 +233,7 @@ export default function RunPage() {
             mock || replaying
               ? skipped
               : online
-                ? `서버 연결됨 · ${modelMode === "person" ? "사람 판별 모델 사용" : "모델 미연결이라 '신호 변화'만 판단해요"}`
+                ? `서버 연결됨 · ${modelMode === "person" ? "사람 판별 모델 사용" : "모델 없이 빈 방 대비 신호 변화(p)를 측정 기준으로 판단해요"}`
                 : dataMode === "loading"
                   ? "서버에 연결하는 중이에요"
                   : "서버에 연결되지 않았어요"
@@ -351,11 +361,13 @@ export default function RunPage() {
                 : calIssues.length
                   ? `마지막 보정(${cal?.finished_at ? clock(Date.parse(cal.finished_at), false) : "?"})이 미덥지 않아요 · 모두 구역 밖에서 다시 보정하세요`
                   : done[3]
-                  ? `기준선 저장됨: ${calibratedReceiving.map((n) => n.name).join(", ")}${cal?.finished_at ? ` · ${clock(Date.parse(cal.finished_at), false)}` : ""}`
+                  ? `기준선 저장됨: ${calibratedReceiving.map((n) => n.name).join(", ")}${cal?.finished_at ? ` · ${clock(Date.parse(cal.finished_at), false)}` : ""}${resultOverwritten ? " · 결과 기록은 확인 불가" : ""}`
                   : restarted.length
                     ? `${restarted.map((n) => n.name).join(", ")} 보드가 다시 켜져서 다시 보정해야 해요`
                     : cal?.status === "failed"
-                      ? "지난 보정이 실패했어요. 다시 해요"
+                      ? resultOverwritten
+                        ? "기준선은 저장됨 · 결과 기록은 확인 불가"
+                        : "지난 보정이 실패했어요. 다시 해요"
                       : cal?.status === "done"
                         ? `기준선이 있어요(${clock(Date.parse(cal.finished_at ?? cal.ends_at), false)} 보정) · 수신기가 다시 들어오면 그대로 써요`
                         : "아직 보정하지 않았어요"
@@ -447,12 +459,14 @@ export default function RunPage() {
                 return (
                   <li
                     key={id}
-                    className={`rounded-xl border px-4 py-2.5 ${issue ? "border-amber-300 bg-amber-50" : r.ok ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200"}`}
+                    className={`rounded-xl border px-4 py-2.5 ${issue ? "border-amber-300 bg-amber-50" : r.ok || resultOverwritten ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200"}`}
                   >
                     <b>{r.node}</b> ·{" "}
                     {r.ok
-                      ? `기준선 저장 (판정 ${r.windows ?? "?"}개, 문턱 ${r.tau !== undefined ? r.tau.toFixed(1) : "?"}, 초당 ${r.fps ?? "—"}개)`
-                      : r.error ?? "실패"}
+                      ? calibrationNote(r)
+                      : resultOverwritten
+                        ? "기준선은 저장됨 · 결과 기록은 확인 불가(이 서버 버전)"
+                        : r.error ?? "실패"}
                     {issue ? (
                       <div className="mt-0.5 text-amber-800">
                         {issue} 모두 구역 밖에서 {duration(CAL_RECOMMENDED_S)} 다시 보정하세요.
@@ -535,7 +549,7 @@ export default function RunPage() {
                     </div>
                   </div>
                   <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
-                    {state.mode === "person" ? "사람 모양 = 사람 있음(흐리고 ? = 가능성 있음). " : "파형 동그라미 = 빈 방과 신호가 달라짐(사람인지는 판단 안 함). "}
+                    {state.mode === "person" ? "사람 모양 = 사람 있음(흐리고 ? = 가능성 있음). " : `파형 동그라미 = 빈 방과 신호가 달라짐 · ${rangeText()}. `}
                     점선 상자 = 실험자가 누른 실제 상태. 구역 단위라 정확한 위치나 인원수는 알 수 없어요.
                   </p>
                 </div>
