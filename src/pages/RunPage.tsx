@@ -405,9 +405,10 @@ export default function RunPage() {
               ))}
             </ul>
           ) : null}
-          {notCalibrated.length && !calRunning ? (
+          {notCalibrated.length && calibratedReceiving.length && !calRunning ? (
             <p className="mt-2 text-sm text-amber-800">
-              {notCalibrated.map((n) => n.name).join(", ")}은(는) 아직 보정 전이에요. 이 보드를 쓰려면 감지를 끄고 다시 보정해요.
+              {notCalibrated.map((n) => n.name).join(", ")}은(는) 아직 보정 전이에요.{" "}
+              {detecting ? "이 보드도 쓰려면 감지를 끄고 다시 보정해요." : "이 보드도 쓰려면 '다시 보정하기'를 눌러요."}
             </p>
           ) : null}
         </StepCard>
