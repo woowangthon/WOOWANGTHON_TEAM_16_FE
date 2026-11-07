@@ -27,6 +27,7 @@ export interface ZoneState {
   name: string;
   polygon: number[][];
   state: ZoneStateCode;
+  server_state?: ZoneStateCode; // 화면 판단 범위(lib/ranges.ts)로 다시 매기기 전 서버 상태
   p: number | null;
   evidence: string[];
   partial_signal: boolean;

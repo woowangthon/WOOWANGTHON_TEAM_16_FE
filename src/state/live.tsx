@@ -26,6 +26,7 @@ import {
 } from "../lib/history";
 import { nodeStatusLabel, predLabel, type Truth } from "../lib/labels";
 import { mockState } from "../lib/mock";
+import { applyRanges } from "../lib/ranges";
 import { PROTOCOL_ID } from "../lib/protocol";
 import type { DataModeLabel, ExperimentRecord } from "../lib/records";
 import { compare } from "../lib/scoring";
@@ -186,7 +187,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           if (detail.active_incident) {
             const st = await api.incidentState(detail.active_incident.id);
             if (!alive) return;
-            setLiveState(st);
+            setLiveState(applyRanges(st));
           } else {
             setLiveState(null);
           }
@@ -224,7 +225,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       return;
     }
     const make = () => {
-      setMockSnap(mockState(Date.now()));
+      setMockSnap(applyRanges(mockState(Date.now())));
       setLastUpdate(Date.now());
     };
     make();

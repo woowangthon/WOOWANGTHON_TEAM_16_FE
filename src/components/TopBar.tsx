@@ -31,7 +31,7 @@ export function ModeBadges() {
         {mode.text}
       </Chip>
       {modelMode === "change" ? (
-        <Chip className="px-3 py-1 text-[13px] bg-amber-50 text-amber-800 ring-amber-200">모델 미연결 · 신호 변화만</Chip>
+        <Chip className="px-3 py-1 text-[13px] bg-amber-50 text-amber-800 ring-amber-200">모델 없음 · 신호 변화 기준</Chip>
       ) : modelMode === "person" ? (
         <Chip className="px-3 py-1 text-[13px] bg-slate-50 text-slate-700 ring-slate-200">사람 판별 모델 사용</Chip>
       ) : null}
