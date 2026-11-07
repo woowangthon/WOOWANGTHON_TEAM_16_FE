@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export function Card({ className = "", children }: { className?: string; children: ReactNode }) {
   return <section className={`rounded-2xl border border-slate-200 bg-white ${className}`}>{children}</section>;
@@ -27,6 +28,7 @@ export function Chip({ className = "", children }: { className?: string; childre
 }
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Size = "md" | "lg";
 
 const VARIANT: Record<Variant, string> = {
   primary: "bg-brand text-white hover:bg-blue-800 disabled:bg-blue-300",
@@ -35,17 +37,58 @@ const VARIANT: Record<Variant, string> = {
   ghost: "text-slate-600 hover:bg-slate-100 disabled:text-slate-300",
 };
 
+const SIZE: Record<Size, string> = {
+  md: "px-3.5 py-2 text-sm",
+  lg: "px-5 py-3 text-base",
+};
+
 export function Button({
   variant = "secondary",
+  size = "md",
   className = "",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size }) {
   return (
     <button
       type="button"
       {...props}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${VARIANT[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed ${SIZE[size]} ${VARIANT[variant]} ${className}`}
     />
+  );
+}
+
+// 클립보드에 복사하고 2초 동안 "복사됨"을 보여 준다
+export function CopyButton({
+  text,
+  label = "복사",
+  variant = "secondary",
+  size = "md",
+  disabled,
+}: {
+  text: string;
+  label?: string;
+  variant?: Variant;
+  size?: Size;
+  disabled?: boolean;
+}) {
+  const [done, setDone] = useState(false);
+  return (
+    <Button
+      variant={variant}
+      size={size}
+      disabled={disabled}
+      onClick={() => {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setDone(true);
+            window.setTimeout(() => setDone(false), 2000);
+          })
+          .catch(() => setDone(false));
+      }}
+    >
+      {done ? <Check size={17} /> : <Copy size={17} />} {done ? "복사됐어요" : label}
+    </Button>
   );
 }
 

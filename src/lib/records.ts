@@ -66,6 +66,11 @@ export function recordsToCsv(rows: ExperimentRecord[]): string {
   return "﻿" + [HEADERS.join(","), ...lines].join("\r\n");
 }
 
+export function recordsFileName(at = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `watchmate_실험기록_${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}_${p(at.getHours())}${p(at.getMinutes())}.csv`;
+}
+
 export function downloadText(filename: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");

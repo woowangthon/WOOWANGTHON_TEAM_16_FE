@@ -1,62 +1,19 @@
-import { Check, Copy, Eye, EyeOff, Play, Square } from "lucide-react";
+import { Eye, EyeOff, Play, Square } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { API_BASE, API_LABEL, IS_DEPLOYED, api } from "../api/client";
+import { API_LABEL, IS_DEPLOYED, api } from "../api/client";
 import type { BuildingDetail, ModelCard, ScenarioPublic } from "../api/types";
 import DeviceStrip from "../components/DeviceStrip";
 import TopBar from "../components/TopBar";
-import { Button, Card, CardHeader, Chip, Notice } from "../components/ui";
+import { Button, Card, CardHeader, Chip, CopyButton, Notice } from "../components/ui";
+import { collectorCommand, maskToken, useCollectorSettings } from "../lib/collector";
 import { TONE_CHIP } from "../lib/labels";
-import { SITE_FLOOR_LABEL, siteNodePayload, siteZonePayload } from "../lib/layout";
-import { loadJson, saveJson } from "../lib/storage";
-import { ago, clock, duration, secondsSince } from "../lib/time";
+import { siteNodePayload, siteZonePayload } from "../lib/layout";
+import { ensureSite, findSite } from "../lib/site";
+import { ago, duration, secondsSince } from "../lib/time";
 import { useLive } from "../state/live";
 import { useSession } from "../state/session";
 
-const SITE_NAME = "S4-1동 2층 실험";
-const CAL_SECONDS = [60, 120, 180, 300];
-
-// 이미 있는 구역·장치는 건너뛰고 빠진 것만 만든다. 수신기 토큰은 만들 때 한 번만 오므로 받는 즉시 넘긴다.
-async function ensureSite(existingId: number | null, onToken: (buildingId: number, name: string, token: string) => void) {
-  const b: BuildingDetail = existingId
-    ? await api.building(existingId)
-    : await api.createBuilding({ name: SITE_NAME, address: "", floor_label: SITE_FLOOR_LABEL });
-  const zoneIds: Record<string, number> = Object.fromEntries(b.zones.map((z) => [z.name, z.id]));
-  for (const z of siteZonePayload()) {
-    if (zoneIds[z.name] === undefined) zoneIds[z.name] = (await api.createZone(b.id, z)).id;
-  }
-  const have = new Set(b.nodes.map((n) => n.name));
-  for (const n of siteNodePayload()) {
-    if (have.has(n.name)) continue;
-    const created = await api.createNode(b.id, {
-      name: n.name,
-      role: n.role,
-      x: n.x,
-      y: n.y,
-      zone_id: n.zone ? zoneIds[n.zone] ?? null : null,
-    });
-    if (created.token) onToken(b.id, n.name, created.token);
-  }
-  return b.id;
-}
-
-function CopyButton({ text, label = "복사" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <Button
-      onClick={() => {
-        navigator.clipboard
-          .writeText(text)
-          .then(() => {
-            setDone(true);
-            window.setTimeout(() => setDone(false), 2000);
-          })
-          .catch(() => setDone(false));
-      }}
-    >
-      {done ? <Check size={15} /> : <Copy size={15} />} {done ? "복사됨" : label}
-    </Button>
-  );
-}
+// 평소 실험은 '실험 진행' 한 페이지에서 한다. 여기는 가끔 쓰는 설정만 모았다.
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -98,19 +55,20 @@ function MockCard() {
 function ServerCard() {
   const { dataMode, health, error } = useLive();
   const [card, setCard] = useState<ModelCard | null>(null);
+  const offline = dataMode === "offline";
   useEffect(() => {
     api
       .modelCard()
       .then(setCard)
       .catch(() => setCard(null));
-  }, [dataMode === "offline"]);
+  }, [offline]);
 
   return (
     <Card>
       <CardHeader title="서버와 모델" sub={`주소: ${API_LABEL}`} />
       <div className="space-y-3 px-5 py-4 text-sm">
         <div className="flex flex-wrap items-center gap-2">
-          {dataMode === "offline" ? (
+          {offline ? (
             <Chip className={TONE_CHIP.bad}>서버 연결 안 됨</Chip>
           ) : health ? (
             <Chip className={TONE_CHIP.ok}>서버 연결됨 · v{health.version}</Chip>
@@ -123,7 +81,7 @@ function ServerCard() {
             </Chip>
           ) : null}
         </div>
-        {dataMode === "offline" ? (
+        {offline ? (
           IS_DEPLOYED ? (
             <p className="text-amber-800">
               서버를 깨우는 중일 수 있어요(무료 서버는 15분 동안 쓰지 않으면 잠들어요). 1분이 지나도 안 되면 Render에서 서비스 상태를 확인하세요.
@@ -151,7 +109,7 @@ function ServerCard() {
 
 function SiteCard() {
   const { buildings, buildingId, selectBuilding, building, busy, run, setTokens } = useLive();
-  const site = buildings.find((b) => b.floor_label === SITE_FLOOR_LABEL && !b.is_demo) ?? null;
+  const site = findSite(buildings);
   const missing = site ? (site.zone_count ?? 0) < siteZonePayload().length || (site.node_count ?? 0) < siteNodePayload().length : false;
 
   const build = () =>
@@ -163,8 +121,8 @@ function SiteCard() {
   return (
     <Card>
       <CardHeader
-        title="실험 공간"
-        sub="도면의 구역(223호·224호·복도)과 장치(TX-1, RX-301·302·COR)를 서버에 등록해요."
+        title="보고 있는 공간"
+        sub="평소에는 'S4-1동 2층 실험'이에요. 녹화 재생으로 생긴 시연 공간을 볼 때만 바꿔요."
         right={
           buildings.length ? (
             <select
@@ -186,16 +144,11 @@ function SiteCard() {
       />
       <div className="space-y-3 px-5 py-4 text-sm">
         {!site ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-slate-700">아직 S4-1동 2층 실험 공간이 없어요.</span>
-            <Button variant="primary" disabled={!!busy} onClick={build}>
-              S4-1동 2층 실험 공간 만들기
-            </Button>
-          </div>
+          <p className="text-slate-700">아직 실험 공간이 없어요. 실험 진행 2단계에서 등록하세요.</p>
         ) : missing ? (
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-amber-800">
-              {site.name}에 빠진 구역이나 장치가 있어요(구역 {site.zone_count ?? 0}/3, 장치 {site.node_count ?? 0}/4).
+              {site.name}에 빠진 구역이나 보드가 있어요(구역 {site.zone_count ?? 0}/3, 보드 {site.node_count ?? 0}/4).
             </span>
             <Button variant="primary" disabled={!!busy} onClick={build}>
               빠진 것 채우기
@@ -203,7 +156,7 @@ function SiteCard() {
           </div>
         ) : (
           <p className="text-slate-700">
-            <b>{site.name}</b> · 구역 {site.zone_count}개 · 장치 {site.node_count}개
+            <b>{site.name}</b> · 구역 {site.zone_count}개 · 보드 {site.node_count}개
             {site.id !== buildingId ? (
               <Button variant="ghost" className="ml-2" onClick={() => selectBuilding(site.id)}>
                 이 공간 보기
@@ -213,7 +166,7 @@ function SiteCard() {
         )}
         {building ? (
           <p className="text-xs text-slate-500">
-            보고 있는 공간: {building.name} ({building.floor_label || "층 정보 없음"}) · 구역 {building.zones.map((z) => z.name).join(", ") || "없음"}
+            지금 보는 공간: {building.name} ({building.floor_label || "층 정보 없음"}) · 구역 {building.zones.map((z) => z.name).join(", ") || "없음"}
           </p>
         ) : null}
       </div>
@@ -223,34 +176,22 @@ function SiteCard() {
 
 function ReceiversCard({ building }: { building: BuildingDetail }) {
   const { tokens, setTokens, busy, run, now } = useLive();
+  const { gateway, setGateway, apiUrl, setApiUrl } = useCollectorSettings();
   const [show, setShow] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
-  const [gateway, setGateway] = useState<string>(() => loadJson("wm.gatewayPort", "COM6"));
-  // 배포본에서는 배포된 백엔드 주소, 이 PC에서는 로컬 백엔드 주소가 기본값
-  const [apiUrl, setApiUrl] = useState<string>(() => loadJson("wm.collectorApi", API_BASE));
 
   const rx = building.nodes.filter((n) => n.role === "rx");
   const tx = building.nodes.filter((n) => n.role === "tx");
   const zoneName = (id: number | null) => building.zones.find((z) => z.id === id)?.name ?? "구역 없음";
-  const mask = (t: string) => (show ? t : `••••••${t.slice(-4)}`);
   const missingTokens = rx.filter((n) => !tokens[n.name]);
-
   const command = (masked: boolean) =>
-    [
-      ".\\.venv\\Scripts\\python tools\\collector.py live",
-      `--gateway ${gateway || "COM6"}`,
-      `--api ${apiUrl || API_BASE}`,
-      ...rx.map((n) => {
-        const t = tokens[n.name];
-        return `--port gw:${n.name} --token ${t ? (masked ? mask(t) : t) : `<${n.name} 토큰>`}`;
-      }),
-    ].join(" ");
+    collectorCommand({ gateway, api: apiUrl, receivers: rx.map((n) => n.name), tokens, masked });
 
   return (
     <Card>
       <CardHeader
-        title="수신기와 수집기 명령"
-        sub="게이트웨이 PC에서 아래 명령을 실행하면 수신기 데이터가 서버로 들어와요."
+        title="수신기 토큰과 수집기 명령"
+        sub="토큰을 잃어버렸거나 다른 서버로 보낼 때 여기서 바꿔요."
         right={
           <Button variant="ghost" onClick={() => setShow((v) => !v)}>
             {show ? <EyeOff size={15} /> : <Eye size={15} />} {show ? "토큰 가리기" : "토큰 보기"}
@@ -261,7 +202,7 @@ function ReceiversCard({ building }: { building: BuildingDetail }) {
         <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="text-left text-slate-500">
-              {["장치", "구역", "마지막 수신", "신호 세기", "기준선", "토큰(이 PC에 저장)"].map((h) => (
+              {["보드", "구역", "마지막 수신", "신호 세기", "기준선", "토큰(이 브라우저에 저장)"].map((h) => (
                 <th key={h} className="px-3 py-2.5 font-medium first:pl-5">
                   {h}
                 </th>
@@ -293,7 +234,11 @@ function ReceiversCard({ building }: { building: BuildingDetail }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      {t ? <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{mask(t)}</code> : <span className="text-slate-500">없음</span>}
+                      {t ? (
+                        <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{show ? t : maskToken(t)}</code>
+                      ) : (
+                        <span className="text-slate-500">없음</span>
+                      )}
                       {confirmId === n.id ? (
                         <>
                           <span className="text-xs text-red-700">지금 쓰는 토큰은 바로 막혀요.</span>
@@ -328,44 +273,24 @@ function ReceiversCard({ building }: { building: BuildingDetail }) {
         </table>
       </div>
       <div className="space-y-3 border-t border-slate-100 px-5 py-4 text-sm">
-        {tx.length ? (
-          <p className="text-slate-600">
-            송신기: {tx.map((n) => n.name).join(", ")} · 송신기는 토큰이 없고 전원만 켜 두면 돼요.
-          </p>
-        ) : null}
+        {tx.length ? <p className="text-slate-600">송신기: {tx.map((n) => n.name).join(", ")} · 송신기는 토큰이 없고 전원만 켜 두면 돼요.</p> : null}
         {missingTokens.length ? (
           <Notice tone="warn">
-            토큰이 없는 수신기: {missingTokens.map((n) => n.name).join(", ")}. 토큰은 만들 때 한 번만 보여 줘서, 다른 PC에서 만들었다면 '새로 발급'을
+            토큰이 없는 수신기: {missingTokens.map((n) => n.name).join(", ")}. 토큰은 만들 때 한 번만 보여 줘서, 다른 브라우저에서 만들었다면 '새로 발급'을
             눌러야 해요.
           </Notice>
         ) : null}
         <div className="flex flex-wrap gap-3">
           <Field label="게이트웨이 USB 포트">
-            <input
-              id="gateway-port"
-              value={gateway}
-              onChange={(e) => {
-                setGateway(e.target.value);
-                saveJson("wm.gatewayPort", e.target.value);
-              }}
-              className="w-28 rounded-lg border border-slate-300 px-2 py-1.5"
-            />
+            <input id="settings-gateway-port" value={gateway} onChange={(e) => setGateway(e.target.value)} className="w-28 rounded-lg border border-slate-300 px-2 py-1.5" />
           </Field>
           <Field label="수집기가 보낼 서버 주소">
-            <input
-              id="collector-api"
-              value={apiUrl}
-              onChange={(e) => {
-                setApiUrl(e.target.value);
-                saveJson("wm.collectorApi", e.target.value);
-              }}
-              className="w-64 rounded-lg border border-slate-300 px-2 py-1.5"
-            />
+            <input id="collector-api" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} className="w-64 rounded-lg border border-slate-300 px-2 py-1.5" />
           </Field>
         </div>
         <div className="rounded-xl bg-slate-900 px-4 py-3 font-mono text-xs leading-relaxed text-slate-100">
           <div className="text-slate-400"># C:\wm\watchmate-be 폴더에서 실행 (PowerShell)</div>
-          <div className="break-all">{command(true)}</div>
+          <div className="break-all">{command(!show)}</div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <CopyButton text={command(false)} label="명령 복사(토큰 포함)" />
@@ -376,91 +301,15 @@ function ReceiversCard({ building }: { building: BuildingDetail }) {
   );
 }
 
-function CalibrationCard({ building }: { building: BuildingDetail }) {
-  const { busy, run, now } = useLive();
-  const [seconds, setSeconds] = useState(120);
-  const cal = building.calibration;
-  const running = cal?.status === "running";
-  const nodeName = (id: string) => building.nodes.find((n) => String(n.id) === id)?.name ?? `노드 ${id}`;
-  const left = running && cal ? Math.max(0, (Date.parse(cal.ends_at) - now) / 1000) : 0;
-
-  return (
-    <Card>
-      <CardHeader title="기준선 보정" sub="빈 방의 신호를 기준으로 저장해요. 보정이 있어야 감지를 시작할 수 있어요." />
-      <div className="space-y-3 px-5 py-4 text-sm">
-        <ol className="list-decimal space-y-1 pl-5 text-slate-600">
-          <li>수집기 명령이 돌고 있고 수신기가 '방금' 수신 중인지 확인해요.</li>
-          <li>모두 223호·224호·복도에서 나가요. 문과 의자는 실험 때와 같은 자리에 둬요.</li>
-          <li>보정이 끝날 때까지 아무도 들어가지 않아요.</li>
-        </ol>
-        {building.active_incident ? <Notice tone="warn">감지가 켜져 있으면 보정할 수 없어요. 감지를 먼저 꺼 주세요.</Notice> : null}
-
-        {running && cal ? (
-          <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900">
-            <div className="flex flex-wrap items-center gap-3">
-              <b>보정 중</b>
-              <span className="tabular">남은 시간 {duration(left)}</span>
-              <Button className="ml-auto" disabled={!!busy} onClick={() => void run("보정 끝내기", () => api.stopCalibration(building.id))}>
-                <Square size={15} /> 지금 끝내기
-              </Button>
-            </div>
-            <ul className="space-y-0.5 tabular">
-              {Object.entries(cal.progress ?? {}).map(([id, p]) => (
-                <li key={id}>
-                  {nodeName(id)}: 프레임 {p.frames}개 · {p.seconds}초 분량 {p.frames === 0 ? "· 아직 안 들어옴" : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="보정 시간">
-              <select id="cal-seconds" value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} className="rounded-lg border border-slate-300 px-2 py-1.5">
-                {CAL_SECONDS.map((s) => (
-                  <option key={s} value={s}>
-                    {duration(s)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Button
-              variant="primary"
-              disabled={!!busy || !!building.active_incident}
-              onClick={() => void run("보정 시작", () => api.startCalibration(building.id, seconds))}
-            >
-              <Play size={15} /> 보정 시작
-            </Button>
-          </div>
-        )}
-
-        {cal && !running ? (
-          <div className="rounded-xl border border-slate-200 px-4 py-3">
-            <div className="mb-1 font-medium">
-              마지막 보정: {cal.status === "done" ? "완료" : "실패"}
-              {cal.finished_at ? ` · ${clock(Date.parse(cal.finished_at))}` : ""}
-            </div>
-            <ul className="space-y-0.5 text-slate-600">
-              {Object.entries(cal.result ?? {}).map(([id, r]) => (
-                <li key={id} className={r.ok ? "" : "text-red-700"}>
-                  {r.node}: {r.ok ? `기준선 저장 · 프레임 ${r.frames}개 · 초당 ${r.fps ?? "—"}개` : r.error ?? "실패"}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
-
 function ReplayCard() {
   const { replay, busy, run, dataMode } = useLive();
   const [list, setList] = useState<ScenarioPublic[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
+  const offline = dataMode === "offline";
 
   useEffect(() => {
-    if (dataMode === "offline") return;
+    if (offline) return;
     api
       .scenarios()
       .then((s) => {
@@ -468,13 +317,13 @@ function ReplayCard() {
         setFailed(null);
       })
       .catch((e: unknown) => setFailed(e instanceof Error ? e.message : "목록을 불러오지 못했어요."));
-  }, [dataMode === "offline"]);
+  }, [offline]);
 
   return (
     <Card>
       <CardHeader
         title="녹화 재생(시연)"
-        sub="녹화해 둔 데이터를 서버가 처음부터 다시 처리해요. 시연용 공간이 따로 생기고 화면에 '기록 재생'이 표시돼요."
+        sub="녹화해 둔 데이터를 서버가 처음부터 다시 처리해요. 시연용 공간이 따로 생기고, 실험 진행 화면 위에 '기록 재생'이 표시돼요."
         right={
           <select id="replay-speed" aria-label="재생 속도" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
             {[1, 2, 4].map((s) => (
@@ -529,11 +378,12 @@ function ReplayCard() {
 
 export default function DevicesPage() {
   const { dataMode, building, error, busy } = useLive();
+  const sub = "평소에는 쓰지 않아요. 실험은 '실험 진행' 한 페이지에서 차례대로 하면 돼요.";
 
   if (dataMode === "mock") {
     return (
-      <div className="mx-auto max-w-[1400px] space-y-5">
-        <TopBar title="장치 관리" sub="서버·실험 공간·수신기·기준선 보정" />
+      <div className="space-y-5">
+        <TopBar title="고급 설정" sub={sub} />
         <Notice>가상 데이터로 보는 중이라 실제 장치는 관리할 수 없어요. 아래에서 끄면 서버 정보가 보여요.</Notice>
         <MockCard />
       </div>
@@ -541,8 +391,8 @@ export default function DevicesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-5">
-      <TopBar title="장치 관리" sub="서버·실험 공간·수신기·기준선 보정" />
+    <div className="space-y-5">
+      <TopBar title="고급 설정" sub={sub} />
       {busy ? <Notice>{busy} 중이에요…</Notice> : error && dataMode !== "offline" ? <Notice tone="bad">{error}</Notice> : null}
       <div className="grid gap-5 xl:grid-cols-2">
         <ServerCard />
@@ -552,7 +402,6 @@ export default function DevicesPage() {
         <>
           <DeviceStrip />
           <ReceiversCard building={building} />
-          <CalibrationCard building={building} />
         </>
       ) : null}
       {dataMode !== "offline" ? <ReplayCard /> : null}

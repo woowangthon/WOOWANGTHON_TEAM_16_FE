@@ -457,3 +457,14 @@ export function useLive(): LiveValue {
   if (!v) throw new Error("LiveProvider가 필요합니다.");
   return v;
 }
+
+// 구역마다 실험자가 마지막으로 입력한 실제 상태
+export function useTruthMap(): Record<number, Truth> {
+  const { state, truthEvents } = useLive();
+  const map: Record<number, Truth> = {};
+  for (const z of state?.zones ?? []) {
+    const ev = currentTruth(truthEvents, z.id);
+    if (ev) map[z.id] = ev.truth;
+  }
+  return map;
+}

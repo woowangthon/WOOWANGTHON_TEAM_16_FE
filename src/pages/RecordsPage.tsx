@@ -4,7 +4,7 @@ import LogPanel from "../components/LogPanel";
 import TopBar from "../components/TopBar";
 import { Button, Card, CardHeader, Chip } from "../components/ui";
 import { TRUTHS, TRUTH_LABEL } from "../lib/labels";
-import { downloadText, recordsToCsv } from "../lib/records";
+import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { OUTCOME_CHIP, OUTCOME_LABEL, type Outcome } from "../lib/scoring";
 import { useLive } from "../state/live";
 
@@ -27,7 +27,7 @@ export default function RecordsPage() {
   });
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-5">
+    <div className="space-y-5">
       <TopBar title="기록 보기" sub="저장한 실험 기록과 오류 종류를 모아 봐요" />
 
       <Card>
@@ -92,11 +92,7 @@ export default function RecordsPage() {
             <>
               <Button
                 disabled={rows.length === 0}
-                onClick={() => {
-                  const d = new Date();
-                  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}_${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
-                  downloadText(`watchmate_실험기록_${stamp}.csv`, recordsToCsv(rows));
-                }}
+                onClick={() => downloadText(recordsFileName(), recordsToCsv(rows))}
               >
                 <Download size={15} /> CSV 내보내기
               </Button>
@@ -125,7 +121,7 @@ export default function RecordsPage() {
           }
         />
         {rows.length === 0 ? (
-          <p className="px-5 py-6 text-sm text-slate-500">저장한 기록이 없어요. 실험 검증 화면에서 실제 상태를 입력하고 저장하세요.</p>
+          <p className="px-5 py-6 text-sm text-slate-500">저장한 기록이 없어요. 실험 진행 6단계에서 실제 상태 버튼을 누르면 쌓여요.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-sm">

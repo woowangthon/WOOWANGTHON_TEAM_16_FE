@@ -37,7 +37,7 @@ export default function ExperimentPanel({
       <div className="px-5 py-6 text-sm text-slate-500">
         {frozen
           ? "끝난 감지(또는 다 재생된 녹화)는 실험 기록을 더 받지 않아요."
-          : "감지를 켜면 실제 상태를 입력하고 예측과 비교할 수 있어요. 실시간 현황이나 장치 관리에서 감지를 시작하세요."}
+          : "5단계에서 감지를 켜면 실제 상태를 입력하고 예측과 비교할 수 있어요."}
       </div>
     );
   }
