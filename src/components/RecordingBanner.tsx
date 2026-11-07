@@ -14,6 +14,7 @@ const PHASE_TEXT: Record<string, string> = {
   starting: "감지 준비",
   waiting: "화면 준비 대기",
   armed: "녹화 시작 대기",
+  stopped: "측정 멈춤",
   countdown: "이동 중",
   recording: "녹화 중",
   between: "다음 장면 준비",

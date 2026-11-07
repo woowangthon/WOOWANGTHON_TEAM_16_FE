@@ -35,6 +35,11 @@ def simulate_usb():
         def close(self):
             pass
 
+        def restarts_since_open(self):
+            # 재시작 시험(recording_restart_browser.py): 이 파일이 생기면 보드가 한 번 다시 켜진 것으로 센다.
+            flag = os.environ.get("WATCHMATE_SIM_RESTART_FLAG")
+            return 1 if flag and Path(flag).exists() else 0
+
     col._open_serial = lambda port, baud: Port()
     record_live.load_collector = lambda: col
     sys.argv = [sys.argv[0], *sys.argv[2:]]

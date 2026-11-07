@@ -2,7 +2,7 @@ import type { Truth } from "./labels";
 
 // 녹화 도우미(scripts/record_live.py)가 알려 주는 지금 장면. 개발 서버가 /rec을 127.0.0.1:8765로 넘긴다.
 // 도우미가 꺼져 있거나 배포 화면이면 응답이 없고, 그때는 실제 상태를 손으로 입력한다.
-export type RecPhase = "countdown" | "recording" | "between" | "done" | "idle" | "setup" | "preparing" | "calibrating" | "starting" | "waiting" | "armed";
+export type RecPhase = "countdown" | "recording" | "between" | "done" | "idle" | "setup" | "preparing" | "calibrating" | "starting" | "waiting" | "armed" | "stopped";
 
 export interface RecState {
   sync?: boolean;

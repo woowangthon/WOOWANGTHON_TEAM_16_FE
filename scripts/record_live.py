@@ -41,6 +41,14 @@ MAX_BACKLOG = 20000  # 서버가 멈췄을 때 노드마다 쌓아 둘 줄 수(�
 BATCH = 500  # 한 번에 보내는 프레임 수. 크면 서버가 바쁠 때 한 요청이 오래 걸려 계속 밀린다
 POST_TIMEOUT = 30.0  # 보정 직후 서버가 기준선을 계산하는 동안(수십 초) 기다린다
 REC_PORT = int(os.environ.get("WATCHMATE_REC_PORT", "8765"))
+WAIT_NOTE_SECONDS = 15  # 화면·수신을 이만큼 넘게 기다리면 무엇을 기다리는지 창에 적는다
+NODE_STATUS_KO = {
+    ("stale", "restarted"): "다시 켜짐(재보정 필요)",
+    ("stale", "low_rate"): "프레임 부족",
+    ("stale", None): "신호 끊김",
+    ("warming", None): "판단 준비 중",
+    ("uncalibrated", None): "보정 안 됨",
+}
 
 
 class RecState:
@@ -74,13 +82,26 @@ class RecState:
             self.last_ack = time.monotonic()
             return True
 
-    def wait_screen(self, capture=None, ready=None):
+    def wait_screen(self, capture=None, ready=None, guard=None, explain=None):
+        """화면이 지금 단계를 그렸다고 확인할 때까지 기다린다.
+
+        guard는 기다리는 동안 계속 불러 멈춰야 할 일(보드 재시작)을 예외로 알린다.
+        explain은 WAIT_NOTE_SECONDS마다 불러 무엇을 기다리는지 창에 적는다.
+        """
+        started = time.monotonic()
+        next_note = started + WAIT_NOTE_SECONDS
         while True:
             if capture:
                 capture.check()
+            if guard:
+                guard()
             with self.lock:
                 if self.ack_version == self.data["version"] and time.monotonic() - self.last_ack < 7 and (ready is None or ready()):
                     return
+            now = time.monotonic()
+            if explain and now >= next_note:
+                explain(now - started)
+                next_note = now + WAIT_NOTE_SECONDS
             time.sleep(0.1)
 
     def screen_present(self):
@@ -325,6 +346,19 @@ class ScreenLost(Exception):
     """An unfinished labelled take must be repeated; its continuous raw data remains."""
 
 
+class NodeRestarted(Exception):
+    """보정 뒤 수신 보드가 다시 켜졌다. 보드가 신호 크기 기준을 새로 잡아 이번 기준선으로는 판단할 수 없다.
+
+    서버도 그 보드를 재보정 전까지 판단에서 빼므로 화면이 '녹화 시작 대기'를 확인하지 않는다.
+    기다리지 않고 진행 중인 장면을 지운 뒤 측정을 끝낸다.
+    """
+
+    def __init__(self, nodes: list[str], during_calibration: bool = False):
+        super().__init__(", ".join(nodes))
+        self.nodes = nodes
+        self.during_calibration = during_calibration
+
+
 class Measurement:
     def __init__(self, rec, api, token, site, names, calibration_seconds, tee):
         self.rec, self.api, self.token = rec, api, token
@@ -333,16 +367,58 @@ class Measurement:
         self.calibration_seconds = calibration_seconds
         self.tee = tee
         self.incident_id = None
+        self.restart_base: dict[str, int] | None = None  # 보정을 마쳤을 때 보드별 재시작 횟수
         self.rec.update(building_id=site["id"])
 
     def wait(self, capture, phase, message, **changes):
         say(message)
         self.rec.update(phase=phase, phase_started=time.time(), phase_seconds=0,
                         message=message, **changes)
-        self.rec.wait_screen(capture, self.receiving if phase == "armed" else None)
+        self.wait_screen(capture, self.receiving if phase == "armed" else None)
+
+    def wait_screen(self, capture, ready=None):
+        self.rec.wait_screen(capture, ready, guard=self.check_restarts, explain=self.explain_wait)
 
     def receiving(self):
         return all(time.time() - self.tee.delivered_at[n] < 7 for n in self.names)
+
+    def restart_counts(self) -> dict[str, int]:
+        """수집 포트가 센, 이 명령을 시작한 뒤 보드별 재시작 횟수. 셀 수 없는 포트는 빠진다."""
+        out = {}
+        for n in self.names:
+            counter = getattr(self.tee.ports.get(n), "restarts_since_open", None)
+            if callable(counter):
+                out[n] = counter()
+        return out
+
+    def check_restarts(self) -> None:
+        if self.restart_base is None:  # 보정 전이면 비교할 기준이 없다(보정 중 재시작은 prepare에서 본다)
+            return
+        now = self.restart_counts()
+        hit = sorted(n for n, c in now.items() if c > self.restart_base.get(n, c))
+        if hit:
+            raise NodeRestarted(hit)
+
+    def explain_wait(self, waited: float) -> None:
+        reasons = []
+        if not self.rec.screen_present():
+            reasons.append("실험 진행 화면의 확인이 없어요(화면 꺼짐·가려짐·다른 페이지)")
+        now = time.time()
+        for n in self.names:
+            sent_at = self.tee.delivered_at[n]
+            if sent_at and now - sent_at >= 7:
+                reasons.append(f"{n} 신호가 {now - sent_at:.0f}초째 서버에 안 들어가요")
+        if self.incident_id:
+            try:
+                st = http("GET", f"{self.api}/api/incidents/{self.incident_id}/state", self.token, timeout=5)
+                for node in st.get("nodes", []):
+                    if node.get("role") == "rx" and node.get("name") in self.names and node.get("status") != "ok":
+                        key = (node.get("status"), node.get("reason"))
+                        text = NODE_STATUS_KO.get(key) or NODE_STATUS_KO.get((key[0], None)) or str(key[0])
+                        reasons.append(f"{node['name']} {text}")
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError, AttributeError):
+                reasons.append("서버 상태를 읽지 못했어요")
+        say(f"  … {waited:.0f}초째 기다리는 중: " + ("; ".join(reasons) if reasons else "화면이 이 단계를 그리기를 기다려요"))
 
     def prepare(self, capture, countdown):
         self.wait(capture, "preparing", "빈 방 보정 준비 · 모든 구역을 비우고 실험 진행 화면을 열어 두세요.")
@@ -350,6 +426,7 @@ class Measurement:
         while not all(self.tee.sent[n] for n in self.names):
             capture.wait(0.25)
         self.wait(capture, "calibrating", "빈 방 기준선을 자동 보정합니다. 감지가 시작될 때까지 밖에서 기다리세요.")
+        restarts_before = self.restart_counts()
         detail = http("POST", self.site_url + "/calibration/start", self.token,
                       {"duration_seconds": self.calibration_seconds}, timeout=90)
         run_id = detail["calibration"]["id"]
@@ -368,6 +445,11 @@ class Measurement:
         missing = sorted(set(self.names) - valid)
         if missing:
             sys.exit(f"이번 빈 방 보정에 실패했습니다: {', '.join(missing)}. 본 측정은 시작하지 않았습니다.")
+        restarts_after = self.restart_counts()
+        during = sorted(n for n, c in restarts_after.items() if c > restarts_before.get(n, c))
+        if during:
+            raise NodeRestarted(during, during_calibration=True)
+        self.restart_base = restarts_after
         self.wait(capture, "starting", "보정 완료 · 화면과 연결한 뒤 감지를 시작합니다.")
         incident = http("POST", self.site_url + "/incidents", self.token,
                         {"measurement": True, "note": "실측 자동 녹화 " + self.rec.data["run_id"]})
@@ -444,7 +526,7 @@ def main() -> None:
             rec.update(phase="between", phase_started=finished, finished_at=finished,
                        phase_seconds=0.0, message="장면 종료 · 화면 기록 저장 확인 중")
             if measurement:
-                rec.wait_screen(capture)
+                measurement.wait_screen(capture)
             return saved
 
     col._record_scene = record_scene
@@ -461,6 +543,8 @@ def main() -> None:
 
         def wait(self, seconds):
             super().wait(seconds)
+            if measurement:
+                measurement.check_restarts()  # 녹화 중이면 장면을 지우고 끝낸다(다시 찍어도 판단할 수 없음)
             if measurement and rec.data["phase"] == "recording" and (not rec.screen_present() or not measurement.receiving()):
                 raise ScreenLost()
 
@@ -505,8 +589,15 @@ def main() -> None:
         say(f"  ✓ 서버 {api} · 모드 {health.get('mode')} · {site['name']} · 실시간 수신기 {', '.join(tokens)}")
         if "--yes" not in rest:
             rest.append("--yes")
+    restarted: NodeRestarted | None = None
     try:
         col.main(["session", *rest])
+    except NodeRestarted as exc:
+        restarted = exc
+        when = "보정 중에" if exc.during_calibration else "보정 뒤에"
+        rec.update(phase="stopped", phase_started=time.time(), phase_seconds=0.0,
+                   message=f"{exc} 보드가 {when} 다시 켜져 측정을 멈췄어요. 녹화 도우미 창의 안내를 따라 주세요.")
+        time.sleep(3)  # 화면이 멈춘 이유를 한 번 받아 가게 둔다
     finally:
         rec.update(phase="done", running=False, phase_started=time.time(), phase_seconds=0.0)
         if server:
@@ -521,6 +612,17 @@ def main() -> None:
                 say(f"[실시간] 서버가 오래 멈춰 보내지 못하고 버린 줄: {lost} (녹화 파일에는 모두 있음)")
         if measurement:
             measurement.close()
+    if restarted is not None:
+        when = "보정 중에" if restarted.during_calibration else "보정 뒤에"
+        say(f"\n  ✗ {restarted} 보드가 {when} 다시 켜졌어요(전원이 잠깐 빠졌을 수 있어요).\n"
+            "    보드가 신호 크기 기준을 새로 잡아서, 이번 빈 방 기준선으로는 판단할 수 없어요.\n"
+            "    진행 중이던 장면은 지웠고 감지를 닫았어요. 끝난 장면 파일과 연속 원본은 남아 있어요.\n"
+            "  다시 하려면\n"
+            "    1. 보드 전원(충전기·케이블)을 확인합니다.\n"
+            "    2. 측정 구역을 비우고 실험 진행 화면을 열어 둡니다.\n"
+            f"    3. 같은 명령을 --day만 새 값(예: {day or '2026-11-08'}b)으로 바꿔 다시 실행합니다.\n"
+            "       빈 방 보정부터 첫 장면까지 다시 찍어요. 같은 --day에 섞으면 기준선이 맞지 않아요.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
