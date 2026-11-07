@@ -2,6 +2,7 @@ import { Download, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE, IS_DEPLOYED, api } from "../api/client";
+import RecordingBanner from "../components/RecordingBanner";
 import ExperimentPanel from "../components/ExperimentPanel";
 import GoalTracker from "../components/GoalTracker";
 import { PredLegend, TruthLegend } from "../components/Legends";
@@ -153,6 +154,8 @@ export default function RunPage() {
   return (
     <div>
       <TopBar title="실험 진행" sub="위에서부터 차례대로 하면 돼요. 끝난 단계는 저절로 '완료'로 바뀌고 다음 단계가 열려요." />
+
+      <RecordingBanner />
 
       {mock ? (
         <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-3 text-sm text-blue-900">
@@ -549,7 +552,7 @@ export default function RunPage() {
                     </div>
                   </div>
                   <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
-                    {state.mode === "person" ? "사람 모양 = 사람 있음(흐리고 ? = 가능성 있음). " : `파형 동그라미 = 빈 방과 신호가 달라짐 · ${rangeText()}. `}
+                    {state.mode === "person" ? "사람 모양 = 사람 있음(흐리고 ? = 가능성 있음). " : `파형 동그라미 = 빈 방과 신호가 달라짐 · ${rangeText(state.thresholds)}. `}
                     점선 상자 = 실험자가 누른 실제 상태. 구역 단위라 정확한 위치나 인원수는 알 수 없어요.
                   </p>
                 </div>

@@ -15,7 +15,7 @@ export type ModelMode = "person" | "change";
 export interface Incident {
   id: number;
   building_id: number;
-  source: "alarm" | "manual" | "replay";
+  source: "alarm" | "manual" | "measurement" | "replay";
   status: "active" | "closed";
   started_at: string;
   ended_at: string | null;
@@ -61,6 +61,7 @@ export interface TimelineItem {
 }
 
 export interface IncidentState {
+  thresholds?: { detected: number; possible: number };
   incident: Incident;
   building: {
     id: number;

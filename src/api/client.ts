@@ -106,7 +106,7 @@ export const api = {
   stopCalibration: (buildingId: number) =>
     request<BuildingDetail>("POST", `/api/buildings/${buildingId}/calibration/stop`),
   openIncident: (buildingId: number, note: string) =>
-    request<Incident & { created: boolean }>("POST", `/api/buildings/${buildingId}/incidents`, { note }),
+    request<Incident & { created: boolean }>("POST", `/api/buildings/${buildingId}/incidents`, { note, measurement: true }),
   closeIncident: (incidentId: number) => request<Incident>("POST", `/api/incidents/${incidentId}/close`),
   incidentState: (incidentId: number) => request<IncidentState>("GET", `/api/incidents/${incidentId}/state`),
   planImage: async (buildingId: number): Promise<string> => {

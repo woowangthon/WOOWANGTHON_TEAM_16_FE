@@ -21,7 +21,7 @@ export default function RecordsPage() {
   const modes = useMemo(() => ["전체", ...Array.from(new Set(records.map((r) => r.dataMode)))], [records]);
   const rows = records.filter((r) => (zone === "전체" || r.zone === zone) && (mode === "전체" || r.dataMode === mode));
 
-  const table = TRUTHS.map((t) => {
+  const table = [...TRUTHS, ...new Set(rows.map((r) => r.truth).filter((t) => !TRUTHS.includes(t)))].map((t) => {
     const of = rows.filter((r) => r.truth === t);
     const counts = Object.fromEntries(OUTCOMES.map((o) => [o, of.filter((r) => r.outcome === o).length])) as Record<Outcome, number>;
     return { truth: t, total: of.length, counts, delayed: of.filter((r) => r.delayed).length };

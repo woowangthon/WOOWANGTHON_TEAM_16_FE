@@ -6,7 +6,6 @@ import { trialPhase } from "../lib/protocol";
 import { OUTCOME_CHIP, OUTCOME_LABEL, compare } from "../lib/scoring";
 import { duration } from "../lib/time";
 import { useLive } from "../state/live";
-import RecordingBanner from "./RecordingBanner";
 import { Button, Chip } from "./ui";
 
 export default function ExperimentPanel({
@@ -37,7 +36,6 @@ export default function ExperimentPanel({
   if (!usable || !zone || !state) {
     return (
       <div className="flex flex-col gap-3 px-5 py-6 text-sm text-slate-500">
-        <RecordingBanner />
         {frozen
           ? "끝난 감지(또는 다 재생된 녹화)는 실험 기록을 더 받지 않아요."
           : "5단계에서 감지를 켜면 실제 상태를 입력하고 예측과 비교할 수 있어요."}
@@ -54,7 +52,6 @@ export default function ExperimentPanel({
 
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
-      <RecordingBanner />
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
         <span className="text-sm text-slate-500">대상 공간</span>
         {zones.map((z) => (

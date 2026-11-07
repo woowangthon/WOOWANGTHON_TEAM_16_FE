@@ -13,11 +13,11 @@ export function predLabel(state: ZoneStateCode, mode: ModelMode): PredLabel {
   switch (state) {
     // 1단계(변화 감지) 서버는 lib/ranges.ts의 측정 기준으로 다시 매긴 상태를 받는다
     case "detected":
-      return { text: person ? "사람 있음" : "사람 측정됨", cls: "present" };
+      return { text: person ? "사람 있음" : "신호 변화 큼", cls: "present" };
     case "possible":
-      return { text: person ? "가능성 있음" : "있는지 애매함", cls: "maybe" };
+      return { text: person ? "가능성 있음" : "신호 변화 가능", cls: "maybe" };
     case "not_detected":
-      return { text: person ? "감지 안 됨" : "비어 있음", cls: "absent" };
+      return { text: person ? "감지 안 됨" : "뚜렷한 변화 없음", cls: "absent" };
     case "warming":
       return { text: "판단 준비 중", cls: "unknown" };
     case "no_signal":
@@ -45,7 +45,7 @@ export const PRED_CHIP: Record<PredClass, string> = {
 };
 
 // 실험자가 입력하는 실제 상태. 채점에만 쓰고 예측 계산에는 쓰지 않는다.
-export type Truth = "empty" | "standing" | "sitting" | "lying";
+export type Truth = "empty" | "standing" | "sitting" | "lying" | "present";
 
 export const TRUTHS: Truth[] = ["empty", "standing", "sitting", "lying"];
 
@@ -54,6 +54,7 @@ export const TRUTH_LABEL: Record<Truth, string> = {
   standing: "서 있음",
   sitting: "앉아 있음",
   lying: "누워 있음",
+  present: "사람 있음(기타 장면)",
 };
 
 export const TRUTH_COLOR: Record<Truth, string> = {
@@ -61,6 +62,7 @@ export const TRUTH_COLOR: Record<Truth, string> = {
   standing: "#16a34a",
   sitting: "#2563eb",
   lying: "#7c3aed",
+  present: "#047857",
 };
 
 export type Tone = "ok" | "warn" | "bad" | "idle";

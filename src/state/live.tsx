@@ -1,3 +1,4 @@
+import { useLocation } from "react-router-dom";
 import {
   createContext,
   useCallback,
@@ -87,6 +88,7 @@ function errorText(e: unknown): string {
 }
 
 export function LiveProvider({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
   const { token, mockOnly } = useSession();
   const [previewMock, setPreviewMockState] = useState<boolean>(() => loadJson("wm.previewMock", false));
   const mock = mockOnly || previewMock;
@@ -294,7 +296,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       const label = predLabel(zone.state, state.mode);
       const outcome = compare(truthEv.truth, label.cls);
       const matched = firstMatchAt(history[String(zoneId)], truthEv.truth, truthEv.at);
-      const reactionSec = matched === null ? null : (matched - truthEv.at) / 1000;
+      const reactionSec = matched === null || matched > at ? null : (matched - truthEv.at) / 1000;
       // 판단 불가(채점 제외)는 반응 시간을 따지지 않는다
       const delayed =
         outcome === "unscored" ? false : reactionSec === null ? (at - truthEv.at) / 1000 > delayLimit : reactionSec > delayLimit;
@@ -335,6 +337,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const pushRecord = useCallback((r: ExperimentRecord) => {
     setRecords((rs) => {
+      if (rs.some((old) => old.incidentId === r.incidentId && old.zone === r.zone && old.truthSince === r.truthSince && r.how === "자동")) return rs;
       const next = [r, ...rs];
       saveJson("wm.records", next);
       return next;
@@ -454,9 +457,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // 장면이 끝나면 구역마다 그 장면 동안(앞 20초는 따라오는 시간이라 뺌)의 판단 비율을 메모에 담아 저장한다
   const saveSceneRecords = useCallback(
-    (scene: string, startedAt: number) => {
+    (scene: string, startedAt: number, at = Date.now()) => {
       if (!state) return;
-      const at = Date.now();
       for (const z of state.zones) {
         const ev = currentTruth(truthEvents, z.id);
         if (!ev || ev.at !== startedAt || savedTrial(z.name, ev.at)) continue;
@@ -464,7 +466,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         const sh = shareBetween(history[String(z.id)], from, at);
         const pct = (v: number) => `${Math.round(v * 100)}%`;
         const note = sh
-          ? `녹화 장면 ${scene} · 측정됨 ${pct(sh.present)} · 애매함 ${pct(sh.maybe)} · 비어 있음 ${pct(sh.absent)} · 판단 불가 ${pct(sh.unknown)}`
+          ? `녹화 장면 ${scene} · ${predLabel("detected", state.mode).text} ${pct(sh.present)} · ${predLabel("possible", state.mode).text} ${pct(sh.maybe)} · ${predLabel("not_detected", state.mode).text} ${pct(sh.absent)} · 판단 불가 ${pct(sh.unknown)}`
           : `녹화 장면 ${scene} · 판단 기록 없음`;
         const r = buildRecord(z.id, "자동", note, ev, at);
         if (r) pushRecord(r);
@@ -473,10 +475,34 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [state, truthEvents, savedTrial, history, buildRecord, pushRecord],
   );
 
+  // 동기 녹화는 도우미의 고정된 시작/끝 시각으로 기록한다. 새로고침해도 같은 장면은 한 번만 저장한다.
+  useEffect(() => {
+    if (pathname !== "/" || document.visibilityState !== "visible" || dataMode !== "live") return;
+    if (!rec?.sync || !rec.scene || !rec.started_at || !state || rec.incident_id !== state.incident.id ||
+        mock || !historyKey || keyRef.current !== historyKey ||
+        (rec.phase !== "recording" && rec.phase !== "between")) return;
+    const at = Math.round(rec.started_at * 1000);
+    const additions: TruthEvent[] = [];
+    for (const z of state.zones) {
+      const rx = state.nodes.find((n) => n.role === "rx" && n.zone_id === z.id && rec.labels[n.name]);
+      const truth = rx && truthFromLabel(rec.labels[rx.name]);
+      if (truth && !truthEvents.some((e) => e.zoneId === z.id && e.at === at)) {
+        additions.push({zoneId: z.id, truth, at});
+      }
+    }
+    if (additions.length) {
+      const next = [...truthEvents, ...additions];
+      setTruthEvents(next);
+      saveJson(`wm.truth.${historyKey}`, next);
+    } else if (rec.phase === "between" && rec.finished_at) {
+      saveSceneRecords(rec.scene, at, Math.round(rec.finished_at * 1000));
+    }
+  }, [pathname, dataMode, rec, state, mock, historyKey, truthEvents, saveSceneRecords]);
+
   const appliedRef = useRef<{ key: string; scene: string; at: number } | null>(null);
   const savedKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!recSync || mock || !state || state.summary.frozen || state.incident.status !== "active") return;
+    if (rec?.sync || !recSync || mock || !state || state.summary.frozen || state.incident.status !== "active") return;
     const applied = appliedRef.current;
     if (!rec) {
       // 녹화 도우미가 끝났다. 마지막 장면을 저장한다

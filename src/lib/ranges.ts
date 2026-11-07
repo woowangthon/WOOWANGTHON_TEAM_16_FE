@@ -28,13 +28,15 @@ export function rangeState(serverState: ZoneStateCode, p: number | null | undefi
 // 서버 응답의 구역 상태를 위 범위로 다시 매긴다. 지도·카드·기록·CSV가 모두 이 값을 쓴다.
 // 사람 판별 모델(person 모드)이 붙은 서버는 그 모델의 문턱을 그대로 따른다.
 export function applyRanges(st: IncidentState): IncidentState {
-  if (st.mode !== "change") return st;
+  if (st.thresholds || st.mode !== "change") return st;
   const zones = st.zones.map((z) => ({ ...z, server_state: z.state, state: rangeState(z.state, z.p) }));
   const states = Object.fromEntries(Object.keys(st.summary.states).map((k) => [k, 0])) as Record<ZoneStateCode, number>;
   for (const z of zones) states[z.state] = (states[z.state] ?? 0) + 1;
   return { ...st, zones, summary: { ...st.summary, states } };
 }
 
-export function rangeText(): string {
-  return `측정됨 p ${RANGE.present.toFixed(2)} 이상 · 애매함 ${RANGE.empty.toFixed(2)}~${RANGE.present.toFixed(2)} · 비어 있음 ${RANGE.empty.toFixed(2)} 미만`;
+export function rangeText(thresholds?: IncidentState["thresholds"]): string {
+  const detected = (thresholds?.detected ?? RANGE.present).toFixed(2);
+  const possible = (thresholds?.possible ?? RANGE.empty).toFixed(2);
+  return `변화 큼 p ${detected} 이상 · 변화 가능 ${possible} 이상~${detected} 미만`;
 }

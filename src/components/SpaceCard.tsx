@@ -2,7 +2,6 @@ import { Activity, CircleHelp, PersonStanding, Radar, WifiOff } from "lucide-rea
 import type { ModelMode, NodeInfo, ZoneState } from "../api/types";
 import { PRED_CHIP, TRUTH_LABEL, predLabel, type Truth } from "../lib/labels";
 import { ago } from "../lib/time";
-import { rangeText } from "../lib/ranges";
 import { Chip } from "./ui";
 
 const FRAME: Record<string, string> = {
@@ -66,7 +65,7 @@ export default function SpaceCard({
         {zone.partial_signal ? <p className="text-amber-700">이 구역 수신기 중 일부만 신호가 와요.</p> : null}
         {compact ? null : (
           <p className="text-slate-400">
-            {person ? "자세 예측은 아직 없어요(존재 여부만 판단)." : `모델 없이 빈 방 대비 신호 변화로 판단해요(${rangeText()}).`}
+            {person ? "자세 예측은 아직 없어요(존재 여부만 판단)." : "빈 방 기준선과 비교한 신호 변화예요."}
           </p>
         )}
       </div>
