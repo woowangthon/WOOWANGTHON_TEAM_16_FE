@@ -26,6 +26,7 @@ import {
 } from "../lib/history";
 import { nodeStatusLabel, predLabel, type Truth } from "../lib/labels";
 import { mockState } from "../lib/mock";
+import { PROTOCOL_ID } from "../lib/protocol";
 import type { DataModeLabel, ExperimentRecord } from "../lib/records";
 import { compare } from "../lib/scoring";
 import { loadJson, saveJson } from "../lib/storage";
@@ -315,6 +316,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           })
           .join(" / "),
         note,
+        protocol: PROTOCOL_ID,
       };
     },
     // dataModeLabel은 dataMode에 따라 바뀐다

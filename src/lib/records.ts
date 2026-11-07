@@ -27,11 +27,12 @@ export interface ExperimentRecord {
   modelMode: string;
   reception: string;
   note: string;
+  protocol?: string; // 실험 방식 이름(lib/protocol.ts PROTOCOL_ID). 11/7 첫 시험 기록에는 없다
 }
 
 const HEADERS = [
   "저장 시각", "저장 방식", "상황 번호", "건물", "공간", "수신기", "실제 상태", "실제 상태 시작",
-  "모델 예측", "예측 코드", "모델 출력값", "비교 결과", "반응 시간(초)", "반응 지연", "데이터 모드", "모델", "수신 상태", "메모",
+  "모델 예측", "예측 코드", "모델 출력값", "비교 결과", "반응 시간(초)", "반응 지연", "데이터 모드", "모델", "수신 상태", "메모", "실험 방식",
 ];
 
 function cell(v: unknown): string {
@@ -60,6 +61,7 @@ export function recordsToCsv(rows: ExperimentRecord[]): string {
       r.modelMode,
       r.reception,
       r.note,
+      r.protocol ?? "첫 시험(방식 정하기 전)",
     ].map(cell).join(","),
   );
   // 엑셀에서 한글이 깨지지 않게 BOM을 붙인다

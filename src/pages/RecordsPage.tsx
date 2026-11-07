@@ -1,5 +1,6 @@
 import { Download, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import GoalTracker from "../components/GoalTracker";
 import LogPanel from "../components/LogPanel";
 import TopBar from "../components/TopBar";
 import { Button, Card, CardHeader, Chip } from "../components/ui";
@@ -29,6 +30,8 @@ export default function RecordsPage() {
   return (
     <div className="space-y-5">
       <TopBar title="기록 보기" sub="저장한 실험 기록과 오류 종류를 모아 봐요" />
+
+      <GoalTracker />
 
       <Card>
         <CardHeader

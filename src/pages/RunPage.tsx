@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE, IS_DEPLOYED, api } from "../api/client";
 import ExperimentPanel from "../components/ExperimentPanel";
+import GoalTracker from "../components/GoalTracker";
 import { PredLegend, TruthLegend } from "../components/Legends";
 import PlanView, { planBackground, planFromState } from "../components/PlanView";
 import SpaceCard from "../components/SpaceCard";
@@ -11,7 +12,7 @@ import Timeline from "../components/Timeline";
 import TopBar from "../components/TopBar";
 import { Button, CopyButton, Notice } from "../components/ui";
 import { SERVER_COMMAND, helperCommand } from "../lib/collector";
-import { CAL_RECOMMENDED_S, HOLD_S, SETTLE_S, WARMUP_S } from "../lib/protocol";
+import { CAL_RECOMMENDED_S, GOAL_REQUIRED, HOLD_S, SETTLE_S, WARMUP_S, goalCounts, goalTotal } from "../lib/protocol";
 import { receiverRows, type RxRow } from "../lib/receivers";
 import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { ensureSite, findSite } from "../lib/site";
@@ -473,7 +474,11 @@ export default function RunPage() {
           title={TITLES[5]}
           status={statusOf(6)}
           forceOpen={!!state && (detecting || mock || replaying)}
-          summary={state && (detecting || mock || replaying) ? `저장된 기록 ${records.length}건` : "5단계에서 감지를 켜면 열려요"}
+          summary={
+            state && (detecting || mock || replaying)
+              ? `필수 목표 ${goalTotal(goalCounts(records), GOAL_REQUIRED).done}/${goalTotal(goalCounts(records), GOAL_REQUIRED).total} · 저장된 기록 ${records.length}건`
+              : "5단계에서 감지를 켜면 열려요"
+          }
           before={
             <>
               실험할 방을 고르고, <b>사람이 문턱을 넘는 순간</b> 버튼을 눌러요. 들어갈 때 '앉아 있음'(앉을 거면), 나갈 때 '비어 있음'. 늦게 누르면
@@ -484,6 +489,9 @@ export default function RunPage() {
         >
           {state && plan ? (
             <>
+              <div className="mb-5">
+                <GoalTracker />
+              </div>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
                 <div className="rounded-2xl border border-slate-200">
                   <ExperimentPanel zoneId={zoneId} onZoneChange={setZoneId} full />
