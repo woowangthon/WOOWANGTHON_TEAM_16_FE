@@ -126,6 +126,7 @@ export interface CalibrationNodeResult {
   error?: string;
   windows?: number;
   fps?: number;
+  tau?: number; // 이 기준선의 감지 문턱(빈 방 점수 상위 1%, 최저 2.0)
 }
 
 export interface Calibration {

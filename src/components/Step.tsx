@@ -48,6 +48,7 @@ export function StepCard({
   summary,
   before,
   action,
+  extraAction,
   after,
   children,
   last = false,
@@ -59,6 +60,7 @@ export function StepCard({
   summary?: ReactNode;
   before?: ReactNode;
   action?: ReactNode;
+  extraAction?: ReactNode; // 버튼 아래 작은 보조 동작(예: '그대로 쓰기')
   after?: ReactNode;
   children?: ReactNode;
   last?: boolean;
@@ -102,7 +104,10 @@ export function StepCard({
                 <Hint label="① 하기 전에">{before}</Hint>
                 <div className="flex items-center justify-center gap-3">
                   <ArrowRight aria-hidden size={20} className="hidden shrink-0 text-slate-300 md:block" />
-                  <div className="flex w-full flex-col items-stretch gap-2 md:w-60">{action}</div>
+                  <div className="flex w-full flex-col items-stretch gap-2 md:w-60">
+                    {action}
+                    {extraAction}
+                  </div>
                   <ArrowRight aria-hidden size={20} className="hidden shrink-0 text-slate-300 md:block" />
                 </div>
                 <Hint label="② 누른 뒤에">{after}</Hint>

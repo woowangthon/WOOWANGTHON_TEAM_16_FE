@@ -12,7 +12,7 @@ import Timeline from "../components/Timeline";
 import TopBar from "../components/TopBar";
 import { Button, CopyButton, Notice } from "../components/ui";
 import { SERVER_COMMAND, helperCommand } from "../lib/collector";
-import { CAL_RECOMMENDED_S, GOAL_REQUIRED, HOLD_S, SETTLE_S, WARMUP_S, goalCounts, goalTotal } from "../lib/protocol";
+import { CAL_RECOMMENDED_S, GOAL_REQUIRED, HOLD_S, SETTLE_S, WARMUP_S, calibrationIssue, goalCounts, goalTotal } from "../lib/protocol";
 import { receiverRows, type RxRow } from "../lib/receivers";
 import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { ensureSite, findSite } from "../lib/site";
@@ -45,6 +45,7 @@ export default function RunPage() {
   const [zoneId, setZoneId] = useState<number | null>(null);
   const [calSeconds, setCalSeconds] = useState(CAL_RECOMMENDED_S);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [acceptedCalId, setAcceptedCalId] = useState<number | null>(null);
 
   const mock = dataMode === "mock";
   const replaying = dataMode === "replay";
@@ -71,17 +72,21 @@ export default function RunPage() {
   const incident = state?.incident.status === "active" ? state.incident : building?.active_incident ?? null;
   const detecting = !!incident && incident.status === "active";
 
+  // 마지막 보정이 미덥지 않으면(문턱이 높거나 판정이 적음) 다시 보정하기 전까지 4단계에 머문다. '그대로 쓰기'를 누르면 넘어간다.
+  const calIssues =
+    cal && !calRunning && cal.result && cal.id !== acceptedCalId ? Object.values(cal.result).filter((r) => calibrationIssue(r)) : [];
+
   const done = [
     online,
     online && siteReady,
     online && siteReady && receiving.length > 0,
-    online && siteReady && receiving.length > 0 && !calRunning && calibratedReceiving.length > 0 && restarted.length === 0,
+    online && siteReady && receiving.length > 0 && !calRunning && calibratedReceiving.length > 0 && restarted.length === 0 && calIssues.length === 0,
     online && detecting,
   ];
   const firstOpen = done.findIndex((d) => !d);
   const current = firstOpen === -1 ? 6 : firstOpen + 1;
   const doneCount = done.filter(Boolean).length;
-  const warn4 = restarted.length > 0 || cal?.status === "failed" || (detecting && !done[3]);
+  const warn4 = restarted.length > 0 || cal?.status === "failed" || (detecting && !done[3]) || calIssues.length > 0;
 
   const statusOf = (n: number): StepStatus => {
     if (mock || replaying) return n <= 5 ? "skipped" : "open";
@@ -343,7 +348,9 @@ export default function RunPage() {
               ? skipped
               : calRunning
                 ? `보정 중 · 남은 시간 ${duration(calLeft)}`
-                : done[3]
+                : calIssues.length
+                  ? `마지막 보정(${cal?.finished_at ? clock(Date.parse(cal.finished_at), false) : "?"})이 미덥지 않아요 · 모두 구역 밖에서 다시 보정하세요`
+                  : done[3]
                   ? `기준선 저장됨: ${calibratedReceiving.map((n) => n.name).join(", ")}${cal?.finished_at ? ` · ${clock(Date.parse(cal.finished_at), false)}` : ""}`
                   : restarted.length
                     ? `${restarted.map((n) => n.name).join(", ")} 보드가 다시 켜져서 다시 보정해야 해요`
@@ -354,12 +361,12 @@ export default function RunPage() {
                         : "아직 보정하지 않았어요"
           }
           before={
-            detecting && !done[3]
+            detecting && (!done[3] || calIssues.length)
               ? "감지가 켜져 있으면 보정할 수 없어요."
               : "모두 223호·224호·복도에서 나와요. 실험자도 실험할 때 있을 자리(구역 밖, 예: 복도 끝)에 미리 가 있어요. 문과 의자는 실험할 때와 똑같이 두고, 끝날 때까지 아무도 들어가지 않아요."
           }
           action={
-            detecting && !done[3] ? (
+            detecting && (!done[3] || calIssues.length) ? (
               <Button variant="danger" size="lg" disabled={!!busy} onClick={stopDetection}>
                 <Square size={16} /> 감지 끄기
               </Button>
@@ -376,7 +383,7 @@ export default function RunPage() {
                   지금 끝내기
                 </Button>
               </>
-            ) : done[3] ? (
+            ) : done[3] && !calIssues.length ? (
               <>
                 <Ok>보정돼 있어요</Ok>
                 {!detecting ? (
@@ -407,8 +414,15 @@ export default function RunPage() {
               </div>
             )
           }
+          extraAction={
+            calIssues.length && cal && !calRunning && !detecting ? (
+              <button type="button" onClick={() => setAcceptedCalId(cal.id)} className="text-xs text-slate-500 underline hover:text-slate-800">
+                다시 보정하지 않고 이 보정 그대로 쓰기
+              </button>
+            ) : null
+          }
           after={
-            detecting && !done[3]
+            detecting && (!done[3] || calIssues.length)
               ? "감지를 끄면 '보정 시작' 버튼이 나와요."
               : calRunning
                 ? "시간이 다 되면 저절로 끝나요. 그동안 방에 들어가지 마세요."
@@ -428,11 +442,25 @@ export default function RunPage() {
             </ul>
           ) : cal && !calRunning && cal.result ? (
             <ul className="grid gap-2 text-sm sm:grid-cols-3">
-              {Object.entries(cal.result).map(([id, r]) => (
-                <li key={id} className={`rounded-xl border px-4 py-2.5 ${r.ok ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200"}`}>
-                  <b>{r.node}</b> · {r.ok ? `기준선 저장 (초당 ${r.fps ?? "—"}개)` : r.error ?? "실패"}
-                </li>
-              ))}
+              {Object.entries(cal.result).map(([id, r]) => {
+                const issue = calibrationIssue(r);
+                return (
+                  <li
+                    key={id}
+                    className={`rounded-xl border px-4 py-2.5 ${issue ? "border-amber-300 bg-amber-50" : r.ok ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200"}`}
+                  >
+                    <b>{r.node}</b> ·{" "}
+                    {r.ok
+                      ? `기준선 저장 (판정 ${r.windows ?? "?"}개, 문턱 ${r.tau !== undefined ? r.tau.toFixed(1) : "?"}, 초당 ${r.fps ?? "—"}개)`
+                      : r.error ?? "실패"}
+                    {issue ? (
+                      <div className="mt-0.5 text-amber-800">
+                        {issue} 모두 구역 밖에서 {duration(CAL_RECOMMENDED_S)} 다시 보정하세요.
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
           {notCalibrated.length && calibratedReceiving.length && !calRunning ? (
