@@ -191,7 +191,7 @@ function ReceiversCard({ building }: { building: BuildingDetail }) {
     <Card>
       <CardHeader
         title="수신기 토큰과 수집기 명령"
-        sub="토큰을 잃어버렸거나 다른 서버로 보낼 때 여기서 바꿔요."
+        sub="평소에는 실험 진행 3단계의 자동 실행을 쓰세요. 자동 실행은 켤 때마다 토큰을 새로 받아서, 여기 저장된 토큰은 다른 PC에서 직접 실행할 때만 써요."
         right={
           <Button variant="ghost" onClick={() => setShow((v) => !v)}>
             {show ? <EyeOff size={15} /> : <Eye size={15} />} {show ? "토큰 가리기" : "토큰 보기"}

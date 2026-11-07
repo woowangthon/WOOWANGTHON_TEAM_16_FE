@@ -7,6 +7,13 @@ export const SERVER_COMMAND = "cd C:\\wm\\watchmate-be; .\\.venv\\Scripts\\pytho
 
 export const maskToken = (t: string) => `••••••${t.slice(-4)}`;
 
+// 수집기 자동 실행 도우미: 게이트웨이 포트를 찾고, 보드를 점검하고, 토큰을 서버에서 직접 받아 수집기를 켠다
+export const HELPER_PATH = "C:\\wm\\watchmate-fe\\start-collector.bat";
+
+export function helperCommand(api: string, deployed: boolean): string {
+  return deployed ? `${HELPER_PATH} --api ${api}` : HELPER_PATH;
+}
+
 // 수집기(tools/collector.py live) 실행 명령. 토큰은 이 브라우저에만 있고, 화면에는 가려서 보여 준다.
 export function collectorCommand(opts: {
   gateway: string;

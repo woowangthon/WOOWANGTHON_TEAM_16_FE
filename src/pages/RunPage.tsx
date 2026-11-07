@@ -1,7 +1,7 @@
 import { Download, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { IS_DEPLOYED, api } from "../api/client";
+import { API_BASE, IS_DEPLOYED, api } from "../api/client";
 import ExperimentPanel from "../components/ExperimentPanel";
 import { PredLegend, TruthLegend } from "../components/Legends";
 import PlanView, { planBackground, planFromState } from "../components/PlanView";
@@ -10,7 +10,7 @@ import { StepCard, type StepStatus } from "../components/Step";
 import Timeline from "../components/Timeline";
 import TopBar from "../components/TopBar";
 import { Button, CopyButton, Notice } from "../components/ui";
-import { SERVER_COMMAND, collectorCommand, useCollectorSettings } from "../lib/collector";
+import { SERVER_COMMAND, helperCommand } from "../lib/collector";
 import { receiverRows, type RxRow } from "../lib/receivers";
 import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { ensureSite, findSite } from "../lib/site";
@@ -35,16 +35,13 @@ function Wait({ children }: { children: string }) {
 
 export default function RunPage() {
   const {
-    dataMode, building, state, buildings, tokens, setTokens, selectBuilding, busy, run, now, records,
+    dataMode, building, state, buildings, setTokens, selectBuilding, busy, run, now, records,
     modelMode, replay, error, setPreviewMock, history, truthEvents,
   } = useLive();
   const { mockOnly, exitMock } = useSession();
-  const { gateway, setGateway, apiUrl } = useCollectorSettings();
   const truths = useTruthMap();
   const [zoneId, setZoneId] = useState<number | null>(null);
   const [calSeconds, setCalSeconds] = useState(120);
-  const [confirmTokens, setConfirmTokens] = useState(false);
-  const [showCmd, setShowCmd] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
   const mock = dataMode === "mock";
@@ -55,12 +52,10 @@ export default function RunPage() {
   const site = findSite(buildings);
   const onDemo = !!building?.is_demo;
   const rxNodes = building?.nodes.filter((n) => n.role === "rx") ?? [];
-  const rxNames = rxNodes.map((n) => n.name);
   const rows = receiverRows(state, building, now);
   const receiving = rows.filter(isReceiving);
   const receivingNames = new Set(receiving.map((r) => r.name));
   const silent = rows.filter((r) => !isReceiving(r)).map((r) => r.name);
-  const missingTokens = rxNames.filter((n) => !tokens[n]);
   const siteReady = !!building && !onDemo && building.zones.length > 0 && rxNodes.length > 0;
 
   const cal = building?.calibration ?? null;
@@ -76,7 +71,7 @@ export default function RunPage() {
 
   const done = [
     online,
-    online && siteReady && (missingTokens.length === 0 || receiving.length > 0),
+    online && siteReady,
     online && siteReady && receiving.length > 0,
     online && siteReady && receiving.length > 0 && !calRunning && calibratedReceiving.length > 0 && restarted.length === 0,
     online && detecting,
@@ -84,14 +79,13 @@ export default function RunPage() {
   const firstOpen = done.findIndex((d) => !d);
   const current = firstOpen === -1 ? 6 : firstOpen + 1;
   const doneCount = done.filter(Boolean).length;
-  const warn2 = siteReady && missingTokens.length > 0 && receiving.length === 0;
   const warn4 = restarted.length > 0 || cal?.status === "failed" || (detecting && !done[3]);
 
   const statusOf = (n: number): StepStatus => {
     if (mock || replaying) return n <= 5 ? "skipped" : "open";
     if (n <= 5) {
       if (done[n - 1]) return "done";
-      if (n === current) return (n === 2 && warn2) || (n === 4 && warn4) ? "warn" : "current";
+      if (n === current) return n === 4 && warn4 ? "warn" : "current";
       return "todo";
     }
     if (n === 6) return detecting ? (current === 6 ? "current" : "open") : "todo";
@@ -115,21 +109,11 @@ export default function RunPage() {
       const id = await ensureSite(site?.id ?? null, (bid, name, token) => setTokens(bid, { [name]: token }));
       selectBuilding(id);
     });
-  const reissueTokens = () =>
-    void run("토큰 새로 받기", async () => {
-      if (!building) return;
-      for (const n of rxNodes.filter((x) => !tokens[x.name])) {
-        const res = await api.rotateNodeToken(n.id);
-        setTokens(building.id, { [n.name]: res.token });
-      }
-      setConfirmTokens(false);
-    });
   const startCal = () => building && void run("보정 시작", () => api.startCalibration(building.id, calSeconds));
   const stopCal = () => building && void run("보정 끝내기", () => api.stopCalibration(building.id));
   const startDetection = () => building && void run("감지 시작", () => api.openIncident(building.id, "실험"));
   const stopDetection = () => incident && void run("감지 끄기", () => api.closeIncident(incident.id));
   const endMock = () => (mockOnly ? exitMock() : setPreviewMock(false));
-  const command = (masked: boolean) => collectorCommand({ gateway, api: apiUrl, receivers: rxNames, tokens, masked });
   const downloadCsv = () => downloadText(recordsFileName(), recordsToCsv(records));
 
   const plan = state ? planFromState(state) : null;
@@ -244,16 +228,10 @@ export default function RunPage() {
               : onDemo
                 ? "지금 시연 공간을 보고 있어요"
                 : siteReady && building
-                  ? `${building.name} · 구역 ${building.zones.length}개 · 보드 ${building.nodes.length}개${missingTokens.length ? " · 이 브라우저에 토큰 없음" : ""}`
+                  ? `${building.name} · 구역 ${building.zones.length}개 · 보드 ${building.nodes.length}개`
                   : "아직 등록하지 않았어요"
           }
-          before={
-            warn2 ? (
-              "이 브라우저에는 수신기 토큰(보드 비밀 열쇠)이 없어요. 다른 브라우저나 PC에서 등록했기 때문이에요."
-            ) : (
-              <>처음 한 번만 해요. 223호·224호·복도와 보드 4개(TX-1, RX-301·302·COR)를 서버에 등록해요.</>
-            )
-          }
+          before={<>처음 한 번만 해요. 223호·224호·복도와 보드 4개(TX-1, RX-301·302·COR)를 서버에 등록해요.</>}
           action={
             onDemo && site ? (
               <Button variant="primary" size="lg" onClick={() => selectBuilding(site.id)}>
@@ -263,32 +241,11 @@ export default function RunPage() {
               <Button variant="primary" size="lg" disabled={!online || !!busy} onClick={createSite}>
                 실험 공간 등록하기
               </Button>
-            ) : warn2 ? (
-              confirmTokens ? (
-                <>
-                  <Button variant="danger" size="lg" disabled={!!busy} onClick={reissueTokens}>
-                    네, 새로 받기
-                  </Button>
-                  <Button variant="ghost" onClick={() => setConfirmTokens(false)}>
-                    취소
-                  </Button>
-                </>
-              ) : (
-                <Button variant="primary" size="lg" onClick={() => setConfirmTokens(true)}>
-                  토큰 새로 받기
-                </Button>
-              )
             ) : (
               <Ok>등록돼 있어요</Ok>
             )
           }
-          after={
-            warn2
-              ? confirmTokens
-                ? "새로 받으면 예전 토큰으로 켜 둔 수집기는 멈춰요. 그 수집기는 3단계의 새 명령으로 다시 켜요."
-                : "새 토큰이 이 브라우저에 저장되고, 3단계 수집기 명령에 자동으로 들어가요."
-              : "보드 비밀 열쇠(토큰)가 이 브라우저에 저장되고, 3단계 수집기 명령에 자동으로 들어가요."
-          }
+          after="다음 3단계로 넘어가요. 수신기 토큰(보드 비밀 열쇠)은 3단계 자동 실행이 서버에서 알아서 받아요."
         />
 
         {/* 3. 보드·수집기 */}
@@ -305,47 +262,27 @@ export default function RunPage() {
           }
           before={
             <ol className="list-decimal space-y-1.5 pl-5">
-              <li>TX-1(1번)과 쓸 수신 보드(예: 2번 RX-301)의 전원을 켜요.</li>
-              <li>게이트웨이(5번)를 노트북 USB에 꽂아요.</li>
-              <li>
-                게이트웨이 포트{" "}
-                <input
-                  id="gateway-port"
-                  aria-label="게이트웨이 포트"
-                  value={gateway}
-                  onChange={(e) => setGateway(e.target.value)}
-                  className="mx-1 w-20 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-center font-mono text-sm"
-                />
-                를 확인해요. 장치 관리자 → 포트(COM과 LPT)에서 'CH343'이 붙은 번호예요.
-              </li>
+              <li>TX-1(1번)과 쓸 수신 보드(예: 2번 RX-301)의 전원을 손으로 켜요.</li>
+              <li>게이트웨이(5번)를 노트북 USB에 꽂아요. 포트 번호는 몰라도 돼요.</li>
             </ol>
           }
           action={
             <>
-              <CopyButton
-                text={command(false)}
-                label="수집기 명령 복사"
-                variant="primary"
-                size="lg"
-                disabled={!siteReady || missingTokens.length === rxNames.length}
-              />
-              <button type="button" onClick={() => setShowCmd((v) => !v)} className="text-xs text-slate-500 underline hover:text-slate-800">
-                {showCmd ? "명령 숨기기" : "명령 보기"}
-              </button>
+              <CopyButton text={helperCommand(API_BASE, IS_DEPLOYED)} label="자동 실행 명령 복사" variant="primary" size="lg" disabled={!siteReady} />
+              <p className="text-center text-xs leading-relaxed text-slate-500">
+                탐색기에서 <code>start-collector.bat</code>을 두 번 눌러도 되고,
+                <br />
+                Claude에게 "게이트웨이 꽂았어"라고 해도 돼요
+              </p>
             </>
           }
           after={
             <>
-              PowerShell을 하나 더 열고 <code className="rounded bg-white px-1">cd C:\wm\watchmate-be</code> → 붙여 넣기(Ctrl+V) → Enter.
-              '실시간 전송 중입니다'가 뜨면 그 창은 켜 둔 채로 둬요. 아래 불이 초록으로 바뀌면 완료예요.
+              PowerShell에 붙여 넣고 Enter. 새 창이 게이트웨이를 찾고 <b>TX-1·수신기 3개를 점검해 안 되는 보드와 고칠 점</b>을 알려 준 뒤, 토큰을
+              알아서 받아 수집기를 켜요. 그 창은 켜 둔 채로 두세요. 아래 불이 초록으로 바뀌면 완료예요.
             </>
           }
         >
-          {showCmd ? (
-            <pre className="mb-4 whitespace-pre-wrap break-all rounded-xl bg-slate-900 px-4 py-3 font-mono text-xs leading-relaxed text-slate-100">
-              {command(true)}
-            </pre>
-          ) : null}
           <div className="grid gap-2 sm:grid-cols-3">
             {rows.map((r) => {
               const on = isReceiving(r);
