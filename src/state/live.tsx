@@ -62,6 +62,7 @@ interface LiveValue {
   setDelayLimit: (s: number) => void;
   records: ExperimentRecord[];
   saveRecord: (zoneId: number, note: string) => ExperimentRecord | null;
+  saveOpenTrials: () => number;
   deleteRecord: (id: string) => void;
   clearRecords: () => void;
   tokens: Record<string, string>;
@@ -329,13 +330,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // 한 번의 시도 = 한 구역에서 실제 상태 하나가 이어진 구간(상황 번호 + 구역 + 시작 시각)
+  const savedTrial = useCallback(
+    (zoneName: string, since: number) =>
+      records.find((r) => r.incidentId === (mock ? null : state?.incident.id ?? null) && r.zone === zoneName && r.truthSince === since) ?? null,
+    [records, mock, state],
+  );
+  const zoneNameOf = useCallback((zoneId: number) => state?.zones.find((z) => z.id === zoneId)?.name ?? "", [state]);
+
   const setTruth = useCallback(
     (zoneId: number, truth: Truth) => {
       if (!historyKey) return;
       const at = Date.now();
       const prev = currentTruth(truthEvents, zoneId);
       if (prev && prev.truth === truth) return;
-      if (prev && autoSave) {
+      // 직접 저장한 시도는 다시 저장하지 않는다
+      if (prev && autoSave && !savedTrial(zoneNameOf(zoneId), prev.at)) {
         const rec = buildRecord(zoneId, "자동", "실제 상태를 바꿀 때 자동 저장", prev, at);
         if (rec) pushRecord(rec);
       }
@@ -343,19 +353,39 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setTruthEvents(next);
       saveJson(`wm.truth.${historyKey}`, next);
     },
-    [historyKey, truthEvents, autoSave, buildRecord, pushRecord],
+    [historyKey, truthEvents, autoSave, buildRecord, pushRecord, savedTrial, zoneNameOf],
   );
 
   const saveRecord = useCallback(
     (zoneId: number, note: string) => {
       const ev = currentTruth(truthEvents, zoneId);
       if (!ev) return null;
+      // 저장 버튼을 연달아 눌렀을 때(3초 안) 같은 시도를 두 번 넣지 않는다
+      const last = savedTrial(zoneNameOf(zoneId), ev.at);
+      if (last && Date.now() - last.savedAt < 3000) return last;
       const rec = buildRecord(zoneId, "수동", note, ev, Date.now());
       if (rec) pushRecord(rec);
       return rec;
     },
-    [truthEvents, buildRecord, pushRecord],
+    [truthEvents, buildRecord, pushRecord, savedTrial, zoneNameOf],
   );
+
+  // 감지를 끄기 직전에, 아직 저장하지 않은 시도(구역마다 마지막 실제 상태)를 저장한다
+  const saveOpenTrials = useCallback(() => {
+    if (!state || !autoSave) return 0;
+    const at = Date.now();
+    let n = 0;
+    for (const z of state.zones) {
+      const ev = currentTruth(truthEvents, z.id);
+      if (!ev || savedTrial(z.name, ev.at)) continue;
+      const rec = buildRecord(z.id, "자동", "감지를 끌 때 자동 저장", ev, at);
+      if (rec) {
+        pushRecord(rec);
+        n += 1;
+      }
+    }
+    return n;
+  }, [state, autoSave, truthEvents, savedTrial, buildRecord, pushRecord]);
 
   const deleteRecord = useCallback((id: string) => {
     setRecords((rs) => {
@@ -434,6 +464,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setDelayLimit,
       records,
       saveRecord,
+      saveOpenTrials,
       deleteRecord,
       clearRecords,
       tokens: buildingId !== null ? tokensAll[String(buildingId)] ?? {} : {},
@@ -445,7 +476,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [
       dataMode, previewMock, setPreviewMock, health, buildings, buildingId, selectBuilding, building, mock, state,
       modelMode, replay, error, now, lastUpdate, history, truthEvents, setTruth, autoSave, setAutoSave, delayLimit,
-      setDelayLimit, records, saveRecord, deleteRecord, clearRecords, tokensAll, setTokens, busy, run, refresh,
+      setDelayLimit, records, saveRecord, saveOpenTrials, deleteRecord, clearRecords, tokensAll, setTokens, busy, run, refresh,
     ],
   );
 

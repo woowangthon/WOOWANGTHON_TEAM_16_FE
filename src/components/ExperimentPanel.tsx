@@ -2,6 +2,7 @@ import { CircleCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { currentTruth, firstMatchAt } from "../lib/history";
 import { PRED_CHIP, TRUTHS, TRUTH_LABEL, predLabel } from "../lib/labels";
+import { trialPhase } from "../lib/protocol";
 import { OUTCOME_CHIP, OUTCOME_LABEL, compare } from "../lib/scoring";
 import { duration } from "../lib/time";
 import { useLive } from "../state/live";
@@ -114,6 +115,12 @@ export default function ExperimentPanel({
           )}
         </div>
       </div>
+
+      {truthEv ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip className={`px-3 py-1 text-sm ${trialPhase(elapsed).cls}`}>{trialPhase(elapsed).text}</Chip>
+        </div>
+      ) : null}
 
       {truthEv ? (
         <p className="text-sm text-slate-600 tabular">

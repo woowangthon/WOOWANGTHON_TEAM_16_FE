@@ -11,6 +11,7 @@ import Timeline from "../components/Timeline";
 import TopBar from "../components/TopBar";
 import { Button, CopyButton, Notice } from "../components/ui";
 import { SERVER_COMMAND, helperCommand } from "../lib/collector";
+import { CAL_RECOMMENDED_S, HOLD_S, SETTLE_S, WARMUP_S } from "../lib/protocol";
 import { receiverRows, type RxRow } from "../lib/receivers";
 import { downloadText, recordsFileName, recordsToCsv } from "../lib/records";
 import { ensureSite, findSite } from "../lib/site";
@@ -19,7 +20,7 @@ import { useLive, useTruthMap } from "../state/live";
 import { useSession } from "../state/session";
 
 const TITLES = ["서버 켜기", "실험 공간 등록 (처음 한 번)", "보드 켜고 수집기 실행", "기준선 보정 (빈 방 신호 저장)", "감지 시작", "실험하기", "마치기"];
-const CAL_CHOICES = [60, 120, 180];
+const CAL_CHOICES = [120, CAL_RECOMMENDED_S, 300];
 
 // 프레임이 들어오고 있는 수신기(재시작·프레임 부족이어도 보드는 보내는 중)
 const RECEIVING = new Set<RxRow["status"]>(["seen", "ok", "warming", "uncalibrated"]);
@@ -36,12 +37,12 @@ function Wait({ children }: { children: string }) {
 export default function RunPage() {
   const {
     dataMode, building, state, buildings, setTokens, selectBuilding, busy, run, now, records,
-    modelMode, replay, error, setPreviewMock, history, truthEvents,
+    modelMode, replay, error, setPreviewMock, history, truthEvents, saveOpenTrials,
   } = useLive();
   const { mockOnly, exitMock } = useSession();
   const truths = useTruthMap();
   const [zoneId, setZoneId] = useState<number | null>(null);
-  const [calSeconds, setCalSeconds] = useState(120);
+  const [calSeconds, setCalSeconds] = useState(CAL_RECOMMENDED_S);
   const [showTimeline, setShowTimeline] = useState(false);
 
   const mock = dataMode === "mock";
@@ -112,7 +113,19 @@ export default function RunPage() {
   const startCal = () => building && void run("보정 시작", () => api.startCalibration(building.id, calSeconds));
   const stopCal = () => building && void run("보정 끝내기", () => api.stopCalibration(building.id));
   const startDetection = () => building && void run("감지 시작", () => api.openIncident(building.id, "실험"));
-  const stopDetection = () => incident && void run("감지 끄기", () => api.closeIncident(incident.id));
+  // 끄기 전에 아직 저장하지 않은 마지막 시도를 저장한다(감지를 끄면 그 시도는 더 이어지지 않으므로)
+  const stopDetection = () =>
+    incident &&
+    void run("감지 끄기", async () => {
+      saveOpenTrials();
+      await api.closeIncident(incident.id);
+    });
+  const endReplay = () =>
+    state &&
+    void run("시연 끝내기", async () => {
+      saveOpenTrials();
+      await api.closeIncident(state.incident.id);
+    });
   const endMock = () => (mockOnly ? exitMock() : setPreviewMock(false));
   const downloadCsv = () => downloadText(recordsFileName(), recordsToCsv(records));
 
@@ -149,7 +162,7 @@ export default function RunPage() {
                 <Square size={15} /> 재생 멈추기
               </Button>
             ) : null}
-            <Button variant="danger" disabled={!!busy} onClick={() => void run("시연 끝내기", () => api.closeIncident(state.incident.id))}>
+            <Button variant="danger" disabled={!!busy} onClick={endReplay}>
               시연 끝내기
             </Button>
           </div>
@@ -176,6 +189,19 @@ export default function RunPage() {
               <span key={i} className={`h-1.5 rounded-full ${d ? "bg-emerald-500" : i + 1 === current ? "bg-blue-500" : "bg-slate-200"}`} />
             ))}
           </div>
+          {!detecting && records.length ? (
+            <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
+              <span>
+                저장한 실험 기록 <b>{records.length}건</b>은 그대로 있어요. 감지를 꺼도 지워지지 않아요.
+              </span>
+              <Link to="/records" className="font-medium text-brand underline">
+                기록 보기
+              </Link>
+              <button type="button" onClick={downloadCsv} className="font-medium text-brand underline">
+                CSV 내려받기
+              </button>
+            </p>
+          ) : null}
           {busy ? <p className="mt-3 text-sm text-blue-700">{busy} 중이에요…</p> : null}
           {error && online && !busy ? <p className="mt-3 text-sm text-red-700">방금 요청이 실패했어요: {error}</p> : null}
         </div>
@@ -322,12 +348,14 @@ export default function RunPage() {
                     ? `${restarted.map((n) => n.name).join(", ")} 보드가 다시 켜져서 다시 보정해야 해요`
                     : cal?.status === "failed"
                       ? "지난 보정이 실패했어요. 다시 해요"
-                      : "아직 보정하지 않았어요"
+                      : cal?.status === "done"
+                        ? `기준선이 있어요(${clock(Date.parse(cal.finished_at ?? cal.ends_at), false)} 보정) · 수신기가 다시 들어오면 그대로 써요`
+                        : "아직 보정하지 않았어요"
           }
           before={
             detecting && !done[3]
               ? "감지가 켜져 있으면 보정할 수 없어요."
-              : "모두 223호·224호·복도에서 나와요. 문과 의자는 실험할 때와 똑같이 둬요. 끝날 때까지 아무도 들어가지 않아요."
+              : "모두 223호·224호·복도에서 나와요. 실험자도 실험할 때 있을 자리(구역 밖, 예: 복도 끝)에 미리 가 있어요. 문과 의자는 실험할 때와 똑같이 두고, 끝날 때까지 아무도 들어가지 않아요."
           }
           action={
             detecting && !done[3] ? (
@@ -368,6 +396,7 @@ export default function RunPage() {
                   {CAL_CHOICES.map((s) => (
                     <option key={s} value={s}>
                       {duration(s)}
+                      {s === CAL_RECOMMENDED_S ? " (권장)" : ""}
                     </option>
                   ))}
                 </select>
@@ -435,7 +464,7 @@ export default function RunPage() {
               </Button>
             )
           }
-          after="2초마다 구역 상태가 새로 나와요. 바로 아래 6단계에서 실험을 진행해요."
+          after={`2초마다 구역 상태가 새로 나와요. 처음 ${WARMUP_S}초쯤은 '판단 준비 중'이니 기다렸다가 6단계를 시작해요.`}
         />
 
         {/* 6. 실험하기 */}
@@ -447,10 +476,11 @@ export default function RunPage() {
           summary={state && (detecting || mock || replaying) ? `저장된 기록 ${records.length}건` : "5단계에서 감지를 켜면 열려요"}
           before={
             <>
-              실험할 방을 고르고, <b>실제 상황이 바뀌는 그 순간</b> 해당 버튼을 눌러요. 예: 들어가 의자에 앉는 순간 '앉아 있음', 나가는 순간 '비어 있음'.
+              실험할 방을 고르고, <b>사람이 문턱을 넘는 순간</b> 버튼을 눌러요. 들어갈 때 '앉아 있음'(앉을 거면), 나갈 때 '비어 있음'. 늦게 누르면
+              직전 빈 방 시도가 오탐으로 기록돼요.
             </>
           }
-          after="누를 때마다 직전 상태의 결과(일치·오탐·미탐)가 저절로 저장돼요. 모델은 이 버튼을 보지 않아요(채점에만 써요)."
+          after={`각 상태를 ${HOLD_S}초 유지해요. 누르면 '예측이 따라오는 중(${SETTLE_S}초) → 안정 구간 → 다음 상태로 바꿔도 돼요'가 차례로 떠요. 바꿀 때와 감지를 끌 때 결과가 저절로 저장되니 저장 버튼은 안 눌러도 돼요.`}
         >
           {state && plan ? (
             <>
@@ -485,11 +515,11 @@ export default function RunPage() {
                 <div className="rounded-2xl border border-slate-200 px-5 py-4">
                   <b className="text-slate-900">1순위 실험: 빈 방과 가만히 앉은 사람 구분</b>
                   <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-[15px] text-slate-700">
-                    <li>모두 나간 상태에서 '비어 있음'을 누르고 30초 기다려요.</li>
-                    <li>한 명이 들어가 앉는 순간 '앉아 있음'을 눌러요. 숨만 쉬고 가만히 있어요.</li>
-                    <li>예측이 바뀌는지, 앉아 있는 동안 계속 유지되는지 봐요.</li>
-                    <li>나가는 순간 '비어 있음'을 눌러요.</li>
-                    <li>같은 순서를 10번 반복해요.</li>
+                    <li>감지를 켜고 {WARMUP_S}초 기다린 뒤, 모두 방 밖인 걸 확인하고 '비어 있음'을 눌러요. {HOLD_S}초 기다려요.</li>
+                    <li>한 명이 문턱을 넘는 순간 '앉아 있음'을 눌러요. 의자에 앉아 숨만 쉬고 {HOLD_S}초 가만히 있어요.</li>
+                    <li>일어나 문을 나서는 순간 '비어 있음'을 눌러요. {HOLD_S}초 기다려요.</li>
+                    <li>2~3을 10번 반복해요(한 번에 약 2분, 모두 약 20분).</li>
+                    <li>실험자는 구역 밖에 있어요. 복도 구역 안에 서 있으면 RX-COR가 실험자를 잡아요.</li>
                   </ol>
                 </div>
                 <div className="rounded-2xl border border-slate-200 px-5 py-4">
@@ -529,7 +559,7 @@ export default function RunPage() {
                   UI 예시 끝내기
                 </Button>
               ) : replaying && state ? (
-                <Button variant="danger" size="lg" disabled={!!busy} onClick={() => void run("시연 끝내기", () => api.closeIncident(state.incident.id))}>
+                <Button variant="danger" size="lg" disabled={!!busy} onClick={endReplay}>
                   시연 끝내기
                 </Button>
               ) : detecting ? (

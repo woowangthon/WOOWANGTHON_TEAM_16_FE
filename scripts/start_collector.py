@@ -203,6 +203,46 @@ def prepare_tokens(api: str, interactive: bool) -> tuple[dict, dict[str, str]]:
     return site, tokens
 
 
+def gateway_plugged() -> bool:
+    """노트북에 보드 USB(CH34x) 포트가 하나라도 있으면 True."""
+    from serial.tools import list_ports  # type: ignore
+
+    return any("CH34" in (p.description or "") for p in list_ports.comports())
+
+
+def supervise(argv: list[str]) -> int:
+    """수집기를 자식 프로세스로 돌리며 게이트웨이 USB를 지켜본다.
+    게이트웨이가 빠지면 수집기를 멈추고, 다시 꽂히면 처음부터(점검·토큰 포함) 다시 시작한다."""
+    import subprocess
+
+    waiting_said = False
+    while True:
+        if not gateway_plugged():
+            if not waiting_said:
+                say("게이트웨이를 기다리는 중이에요. 노트북 USB에 꽂으면 바로 시작해요. (멈추려면 Ctrl+C)")
+                waiting_said = True
+            time.sleep(2)
+            continue
+        waiting_said = False
+        time.sleep(1.5)  # 꽂은 직후 포트가 자리 잡을 시간
+        child = subprocess.Popen([sys.executable, str(HERE), "--child", *argv])
+        unplugged = False
+        while child.poll() is None:
+            time.sleep(1)
+            if not gateway_plugged():
+                unplugged = True
+                say("\n\n게이트웨이 연결이 끊겼어요. 케이블을 확인하고 다시 꽂으면 저절로 다시 시작해요.")
+                child.terminate()
+                child.wait()
+                break
+        if unplugged:
+            continue
+        if child.returncode == 0:
+            return 0
+        say("\n10초 뒤 다시 시도해요. 멈추려면 Ctrl+C.")
+        time.sleep(10)
+
+
 def main() -> None:
     try:
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -212,8 +252,14 @@ def main() -> None:
     ap.add_argument("--api", default=os.environ.get("WATCHMATE_API", "http://127.0.0.1:8000"))
     ap.add_argument("--seconds", type=float, default=8)
     ap.add_argument("--check", action="store_true", help="점검만 하고 수집기는 켜지 않아요")
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     api = args.api.rstrip("/")
+
+    # 수집기까지 켤 때는 게이트웨이를 지켜보는 감시 역할로 돌고, 실제 일은 자식 프로세스가 한다
+    if not args.check and not args.child:
+        passthrough = ["--api", api, "--seconds", str(args.seconds)]
+        sys.exit(supervise(passthrough))
 
     say("와치메이트 수집기 자동 실행")
     say("1) 서버 확인")
