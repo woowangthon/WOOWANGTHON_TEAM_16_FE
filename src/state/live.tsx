@@ -21,13 +21,15 @@ import {
   appendPrediction,
   currentTruth,
   firstMatchAt,
+  shareBetween,
   type PredHistory,
   type TruthEvent,
 } from "../lib/history";
 import { nodeStatusLabel, predLabel, type Truth } from "../lib/labels";
 import { mockState } from "../lib/mock";
 import { applyRanges } from "../lib/ranges";
-import { PROTOCOL_ID } from "../lib/protocol";
+import { PROTOCOL_ID, SETTLE_S } from "../lib/protocol";
+import { fetchRecording, recTimeToLocal, truthFromLabel, type RecState } from "../lib/recording";
 import type { DataModeLabel, ExperimentRecord } from "../lib/records";
 import { compare } from "../lib/scoring";
 import { loadJson, saveJson } from "../lib/storage";
@@ -72,6 +74,9 @@ interface LiveValue {
   busy: string | null;
   run: (label: string, fn: () => Promise<unknown>) => Promise<boolean>;
   refresh: () => void;
+  rec: RecState | null; // 녹화 도우미가 알려 주는 지금 장면(없으면 null)
+  recSync: boolean; // 녹화 장면으로 실제 상태를 자동 입력할지
+  setRecSync: (on: boolean) => void;
 }
 
 const LiveContext = createContext<LiveValue | null>(null);
@@ -104,6 +109,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [autoSave, setAutoSaveState] = useState<boolean>(() => loadJson("wm.autoSave", true));
   const [delayLimit, setDelayLimitState] = useState<number>(() => loadJson("wm.delayLimit", 30));
   const [tokensAll, setTokensAll] = useState<Record<string, Record<string, string>>>(() => loadJson("wm.tokens", {}));
+  const [rec, setRec] = useState<RecState | null>(null);
+  const [recFetchedAt, setRecFetchedAt] = useState(0);
+  const [recSync, setRecSyncState] = useState<boolean>(() => loadJson("wm.recSync", true));
 
   // 1초마다 시계를 움직여 "n초 전" 같은 표시를 갱신한다
   useEffect(() => {
@@ -390,6 +398,118 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return n;
   }, [state, autoSave, truthEvents, savedTrial, buildRecord, pushRecord]);
 
+  // ---- 녹화 장면 연동 ---------------------------------------------------------
+  // 녹화 도우미(record_live.py)가 1초마다 지금 장면을 알려 준다. 장면 녹화가 시작되면 구역마다 실제 상태를
+  // 그 장면의 라벨로 바꾸고, 장면이 끝나면 그 장면 동안의 판단 비율을 기록으로 저장한다.
+  useEffect(() => {
+    if (mock) {
+      setRec(null);
+      return;
+    }
+    let alive = true;
+    let misses = 0;
+    const tick = async () => {
+      const r = await fetchRecording();
+      if (!alive) return;
+      // 한두 번 못 받은 건 넘기고, 3번 연속 응답이 없으면 녹화 도우미가 끝난 것으로 본다
+      if (r) {
+        misses = 0;
+        setRec(r);
+        setRecFetchedAt(Date.now());
+      } else if (++misses >= 3) {
+        setRec(null);
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [mock]);
+
+  const setRecSync = useCallback((on: boolean) => {
+    setRecSyncState(on);
+    saveJson("wm.recSync", on);
+  }, []);
+
+  // 장면이 바뀔 때마다 구역마다 새 시도를 시작한다(같은 실제 상태가 이어져도 장면별로 따로 채점)
+  const applySceneTruth = useCallback(
+    (changes: { zoneId: number; truth: Truth }[], at: number, scene: string) => {
+      if (!historyKey || !changes.length) return;
+      let next = truthEvents;
+      for (const { zoneId, truth } of changes) {
+        const prev = currentTruth(next, zoneId);
+        if (prev && autoSave && !savedTrial(zoneNameOf(zoneId), prev.at)) {
+          const r = buildRecord(zoneId, "자동", `녹화 장면 ${scene} 시작 전 자동 저장`, prev, at);
+          if (r) pushRecord(r);
+        }
+        next = [...next, { zoneId, truth, at }];
+      }
+      setTruthEvents(next);
+      saveJson(`wm.truth.${historyKey}`, next);
+    },
+    [historyKey, truthEvents, autoSave, savedTrial, zoneNameOf, buildRecord, pushRecord],
+  );
+
+  // 장면이 끝나면 구역마다 그 장면 동안(앞 20초는 따라오는 시간이라 뺌)의 판단 비율을 메모에 담아 저장한다
+  const saveSceneRecords = useCallback(
+    (scene: string, startedAt: number) => {
+      if (!state) return;
+      const at = Date.now();
+      for (const z of state.zones) {
+        const ev = currentTruth(truthEvents, z.id);
+        if (!ev || ev.at !== startedAt || savedTrial(z.name, ev.at)) continue;
+        const from = ev.at + Math.min(SETTLE_S * 1000, (at - ev.at) / 2);
+        const sh = shareBetween(history[String(z.id)], from, at);
+        const pct = (v: number) => `${Math.round(v * 100)}%`;
+        const note = sh
+          ? `녹화 장면 ${scene} · 측정됨 ${pct(sh.present)} · 애매함 ${pct(sh.maybe)} · 비어 있음 ${pct(sh.absent)} · 판단 불가 ${pct(sh.unknown)}`
+          : `녹화 장면 ${scene} · 판단 기록 없음`;
+        const r = buildRecord(z.id, "자동", note, ev, at);
+        if (r) pushRecord(r);
+      }
+    },
+    [state, truthEvents, savedTrial, history, buildRecord, pushRecord],
+  );
+
+  const appliedRef = useRef<{ key: string; scene: string; at: number } | null>(null);
+  const savedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!recSync || mock || !state || state.summary.frozen || state.incident.status !== "active") return;
+    const applied = appliedRef.current;
+    if (!rec) {
+      // 녹화 도우미가 끝났다. 마지막 장면을 저장한다
+      if (applied && savedKeyRef.current !== applied.key) {
+        saveSceneRecords(applied.scene, applied.at);
+        savedKeyRef.current = applied.key;
+      }
+      return;
+    }
+    if (rec.phase === "recording" && rec.scene) {
+      const key = `${state.incident.id}#${rec.day}#${rec.index}#${Math.round(rec.phase_started)}`;
+      if (applied?.key === key) return;
+      if (applied && savedKeyRef.current !== applied.key) {
+        saveSceneRecords(applied.scene, applied.at);
+        savedKeyRef.current = applied.key;
+      }
+      const at = Math.round(recTimeToLocal(rec, rec.phase_started, recFetchedAt));
+      const changes: { zoneId: number; truth: Truth }[] = [];
+      for (const z of state.zones) {
+        const rx = state.nodes.filter((n) => n.role === "rx" && n.zone_id === z.id);
+        const label = rx.map((n) => rec.labels[n.name]).find((l) => l !== undefined);
+        const truth = truthFromLabel(label);
+        if (truth) changes.push({ zoneId: z.id, truth });
+      }
+      applySceneTruth(changes, at, rec.scene);
+      appliedRef.current = { key, scene: rec.scene, at };
+    } else if (applied && savedKeyRef.current !== applied.key) {
+      // 지금 장면 녹화가 끝났다(이동 중·다음 장면 대기·녹화 끝)
+      saveSceneRecords(applied.scene, applied.at);
+      savedKeyRef.current = applied.key;
+    }
+  }, [rec, recFetchedAt, recSync, mock, state, applySceneTruth, saveSceneRecords]);
+
   const deleteRecord = useCallback((id: string) => {
     setRecords((rs) => {
       const next = rs.filter((r) => r.id !== id);
@@ -475,11 +595,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       busy,
       run,
       refresh,
+      rec,
+      recSync,
+      setRecSync,
     }),
     [
       dataMode, previewMock, setPreviewMock, health, buildings, buildingId, selectBuilding, building, mock, state,
       modelMode, replay, error, now, lastUpdate, history, truthEvents, setTruth, autoSave, setAutoSave, delayLimit,
       setDelayLimit, records, saveRecord, saveOpenTrials, deleteRecord, clearRecords, tokensAll, setTokens, busy, run, refresh,
+      rec, recSync, setRecSync,
     ],
   );
 

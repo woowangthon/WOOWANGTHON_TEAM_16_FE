@@ -9,6 +9,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      // 녹화 도우미(scripts/record_live.py)가 알려 주는 지금 장면. 도우미가 꺼져 있으면 응답이 없다
+      "/rec": { target: "http://127.0.0.1:8765", changeOrigin: true },
     },
   },
 });

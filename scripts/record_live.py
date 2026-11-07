@@ -14,12 +14,15 @@ watchmate-be의 `tools/collector.py session`을 그대로 실행하고, 녹화 �
     그것도 없으면 서버 기본값(demo). 실패하면 비밀번호를 물어본다(화면에 안 보임).
   - 수신기 토큰은 서버에서 새로 받아 이 프로그램 안에서만 쓴다(화면·파일에 남기지 않는다).
   - 서버가 잠깐 응답하지 않아도 녹화는 멈추지 않는다. 밀린 것은 최근 것부터 다시 보낸다.
+  - 지금 장면을 http://127.0.0.1:8765/rec/scene 으로 알려 준다. 화면(npm run dev)이 이걸 읽어
+    장면이 바뀔 때마다 구역마다 실제 상태(비어 있음·서 있음·앉아 있음·누워 있음)를 저절로 바꾸고 기록한다.
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import http.server as http_server
 import importlib.util
 import json
 import os
@@ -34,6 +37,68 @@ HERE = Path(__file__).resolve()
 BE = Path(os.environ.get("WATCHMATE_BE") or HERE.parents[2] / "watchmate-be")
 SITE_FLOOR = "S4-1동 2층"
 MAX_BACKLOG = 20000  # 서버가 멈췄을 때 노드마다 쌓아 둘 줄 수(약 4분). 넘으면 오래된 것부터 버린다
+BATCH = 500  # 한 번에 보내는 프레임 수. 크면 서버가 바쁠 때 한 요청이 오래 걸려 계속 밀린다
+POST_TIMEOUT = 30.0  # 보정 직후 서버가 기준선을 계산하는 동안(수십 초) 기다린다
+REC_PORT = 8765
+
+
+class RecState:
+    """화면에 알려 줄 지금 장면. 녹화 도구의 장면 시작·녹화 시작·장면 끝에서 바뀐다."""
+
+    def __init__(self, plan: list[dict], day: str):
+        self.lock = threading.Lock()
+        self.plan = plan
+        self.names = [p["scene"] for p in plan]
+        self.data = {"running": True, "day": day, "index": -1, "total": len(plan), "scene": None,
+                     "description": "", "labels": {}, "phase": "idle", "phase_started": time.time(),
+                     "phase_seconds": 0.0, "next": None}
+
+    def update(self, **kw) -> None:
+        with self.lock:
+            self.data.update(kw)
+            i = self.data["index"]
+            nxt = self.plan[i + 1] if 0 <= i < len(self.plan) - 1 else None
+            self.data["next"] = None if nxt is None else {"scene": nxt["scene"], "description": nxt["description"]}
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return dict(self.data, now=time.time())
+
+
+def serve_rec(state: RecState) -> None:
+    class Handler(http_server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path.split("?")[0] not in ("/rec/scene", "/scene"):
+                self.send_error(404)
+                return
+            body = json.dumps(state.snapshot(), ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # 녹화 화면을 어지럽히지 않는다
+            pass
+
+    try:
+        srv = http_server.ThreadingHTTPServer(("127.0.0.1", REC_PORT), Handler)
+    except OSError as exc:
+        say(f"  ! 화면 연동 포트 {REC_PORT}를 열지 못했어요({exc}). 녹화는 그대로 하고, 실제 상태는 화면에서 손으로 입력하세요.")
+        return
+    threading.Thread(target=srv.serve_forever, daemon=True, name="rec-state").start()
+
+
+def post_frames(api: str, token: str, frames: list[dict], restarted: bool) -> dict:
+    payload: dict = {"frames": frames, "source": "live"}
+    if restarted:
+        payload["restarted"] = True
+    req = urllib.request.Request(api.rstrip("/") + "/api/ingest/csi", data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "X-Node-Token": token})
+    with urllib.request.urlopen(req, timeout=POST_TIMEOUT) as resp:
+        return json.loads(resp.read())
 
 
 def say(text: str = "") -> None:
@@ -169,14 +234,14 @@ class LiveTee:
                 if self.stop.is_set():
                     return
                 continue
-            batch = pending[:2000]
+            batch = pending[:BATCH]
             restarted, now_restarts = False, None
             counter = getattr(self.ports.get(node), "restarts_since_open", None)
             if callable(counter):
                 now_restarts = counter()
                 restarted = now_restarts > self.restarts_seen[node]
             try:
-                self.col._post(self.api, token, batch, "live", restarted)
+                post_frames(self.api, token, batch, restarted)
                 del pending[: len(batch)]
                 self.sent[node] += len(batch)
                 if restarted and now_restarts is not None:
@@ -189,7 +254,7 @@ class LiveTee:
                 if not self.failing:
                     self.failing = True
                     say(f"\n  [실시간] 서버로 보내지 못했어요({str(exc)[:80]}). 녹화는 계속하고, 다시 되면 이어서 보내요.")
-                pending = pending[-1000:]
+                pending = pending[-BATCH * 2:]
                 if self.stop.is_set():
                     return
                 time.sleep(1.0)
@@ -202,6 +267,15 @@ class LiveTee:
         self.stop.set()
         for th in self.threads:
             th.join(timeout=timeout)
+
+
+def opt_value(argv: list[str], name: str) -> str | None:
+    for i, a in enumerate(argv):
+        if a == name and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith(name + "="):
+            return a.split("=", 1)[1]
+    return None
 
 
 def node_names(argv: list[str]) -> list[str]:
@@ -228,6 +302,37 @@ def main() -> None:
         say(__doc__ or "")
         col.main(["session", "--help"])
         return
+
+    # 화면에 지금 장면을 알려 주기 위해 장면 목록과 날짜를 읽는다(녹화 명령에 준 것과 같은 파일)
+    plan_path, day = opt_value(rest, "--plan") or "docs/plans/day_plan.csv", opt_value(rest, "--day") or ""
+    try:
+        plan, _ = col._load_plan(Path(plan_path))
+    except SystemExit:
+        plan = []
+    rec = RecState(plan, day)
+    serve_rec(rec)
+    orig_record_scene = col._record_scene
+
+    def record_scene(sers, labels, seconds, countdown, out, day_, meta_extra, capture):
+        scene = meta_extra.get("scene")
+        rec.update(index=rec.names.index(scene) if scene in rec.names else -1, scene=scene,
+                   description=meta_extra.get("description", ""), labels=dict(labels), phase="countdown",
+                   phase_started=time.time(), phase_seconds=float(countdown))
+        try:
+            return orig_record_scene(sers, labels, seconds, countdown, out, day_, meta_extra, capture)
+        finally:
+            rec.update(phase="between", phase_started=time.time(), phase_seconds=0.0)
+
+    col._record_scene = record_scene
+    base_archive = col.RecordingArchive
+
+    class SceneArchive(base_archive):  # type: ignore[misc, valid-type]
+        def start_scene(self, session_ids, labels, csv_paths, seconds):
+            wall = super().start_scene(session_ids, labels, csv_paths, seconds)
+            rec.update(phase="recording", phase_started=wall, phase_seconds=float(seconds))
+            return wall
+
+    col.RecordingArchive = SceneArchive
 
     tee = None
     if not args.no_live:
@@ -270,6 +375,7 @@ def main() -> None:
     try:
         col.main(["session", *rest])
     finally:
+        rec.update(phase="done", running=False, phase_started=time.time(), phase_seconds=0.0)
         if tee is not None:
             tee.close()
             sent = ", ".join(f"{n} {c:,}개" for n, c in tee.sent.items())

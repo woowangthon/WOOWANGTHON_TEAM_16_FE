@@ -65,3 +65,24 @@ export function firstMatchAt(segs: Segment[] | undefined, truth: Truth, since: n
   }
   return null;
 }
+
+// [from, to] 동안 예측이 각 판단이었던 시간 비율. 2초마다 받으므로 구간 하나는 다음 구간 시작(최대 4초 뒤)까지로 본다.
+// 받은 기록이 없으면 null.
+export function shareBetween(segs: Segment[] | undefined, from: number, to: number): Record<PredClass, number> | null {
+  if (!segs || to <= from) return null;
+  const acc: Record<PredClass, number> = { present: 0, maybe: 0, absent: 0, unknown: 0 };
+  let total = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const next = segs[i + 1];
+    const end = next ? Math.min(next.from, s.to + ONGOING_MS) : s.to + 2000;
+    const a = Math.max(s.from, from);
+    const b = Math.min(end, to);
+    if (b <= a) continue;
+    acc[s.cls] += b - a;
+    total += b - a;
+  }
+  if (total <= 0) return null;
+  for (const k of Object.keys(acc) as PredClass[]) acc[k] /= total;
+  return acc;
+}
