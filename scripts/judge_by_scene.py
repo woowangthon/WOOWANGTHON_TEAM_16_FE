@@ -5,7 +5,8 @@ DB와 녹화 파일은 읽기만 한다. 결과는 화면에 표로 보여 주�
 
 화면과 같은 방식으로 계산한다.
   - 노드별 p를 지수 평균(α=0.5)으로 부드럽게 한다. 프레임이 모자란 창(품질 0.7 미만)은 뺀다.
-  - 구역 판단: 사람 측정됨 p ≥ 0.50, 있는지 애매함 0.20 ~ 0.50, 비어 있음 p < 0.20 (src/lib/ranges.ts)
+  - 구역 판단: 사람 측정됨 p ≥ 0.50, 있는지 애매함 0.20 ~ 0.50, 비어 있음 p < 0.20 (서버 기본 기준과 같음)
+    서버 기준을 MEASURE_DETECT_P·MEASURE_POSSIBLE_P로 바꿨으면 그 값을 따르고, --present·--empty로 다시 채점할 수 있다.
   - 장면이 바뀐 직후는 판단이 따라오는 시간이라, 장면 앞 20초(--settle)는 빼고 센다. 반응 시간은 장면 시작부터 잰다.
 
 실행(C:\\wm\\watchmate-be 폴더, .venv를 켠 PowerShell):
@@ -38,6 +39,21 @@ def cls(p: float) -> str:
     return "측정됨" if p >= PRESENT else ("애매함" if p >= EMPTY else "비어 있음")
 
 
+def env_float(name: str, default: float) -> float:
+    """서버와 같은 기준을 쓰도록 환경 변수, 없으면 watchmate-be/.env에서 읽는다(MEASURE_DETECT_P 등)."""
+    raw = os.environ.get(name)
+    env_file = BE / ".env"
+    if raw is None and env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.strip().partition("=")
+            if key.strip() == name:
+                raw = value.strip().strip('"').strip("'")
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
 def to_epoch(value) -> float:
     dt = datetime.fromisoformat(str(value).replace("T", " "))
     if dt.tzinfo is None:
@@ -64,11 +80,18 @@ def load_scenes(folder: Path) -> list[dict]:
 
 
 def main() -> None:
+    global PRESENT, EMPTY
     ap = argparse.ArgumentParser(description="장면(시간)마다 화면 판단이 맞았는지 정리")
     ap.add_argument("--session", required=True, help="녹화 폴더(예: ..\\data\\sessions\\2026-11-07e)")
     ap.add_argument("--db", default=str(BE / "data" / "app.db"), help="서버 DB 파일")
     ap.add_argument("--settle", type=float, default=20.0, help="장면 시작 뒤 세지 않는 시간(초)")
+    # 저장된 p로 다른 기준을 넣어 다시 채점할 수 있다(예: --present 0.6 --empty 0.3). 기본은 서버 기준과 같다.
+    ap.add_argument("--present", type=float, default=env_float("MEASURE_DETECT_P", PRESENT), help="'측정됨' 기준 p")
+    ap.add_argument("--empty", type=float, default=env_float("MEASURE_POSSIBLE_P", EMPTY), help="'애매함' 기준 p")
     args = ap.parse_args()
+    if not 0 < args.empty < args.present < 1:
+        sys.exit("기준은 0 < --empty < --present < 1이어야 해요.")
+    PRESENT, EMPTY = args.present, args.empty
 
     folder = Path(args.session)
     scenes = load_scenes(folder)
@@ -155,7 +178,8 @@ def main() -> None:
             ok, total = tally[kind]
             say(f"  {kind}: {ok}/{total} 맞음")
     day = folder.name
-    out = folder / f"judge_{day}.csv"
+    suffix = "" if (PRESENT, EMPTY) == (0.50, 0.20) else f"_p{PRESENT:.2f}-{EMPTY:.2f}"  # 다른 기준은 따로 저장
+    out = folder / f"judge_{day}{suffix}.csv"
     with out.open("w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(["장면", "시작", "구역", "노드", "라벨", "기대", "측정됨비율", "애매함비율", "비어있음비율",

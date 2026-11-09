@@ -20,10 +20,18 @@ export const CAL_MIN_WINDOWS = 60;
 // 15:28 보정은 223호 8.9·224호 9.0이었다. 224호에 사람이 서 있을 때 점수가 2~3이라 그 기준선으로는 거의 못 잡는다.
 export const CAL_WARN_TAU = 3.0;
 
-// 이 노트북 백엔드 기준: 서버가 기준선을 저장했으면(ok) 보정은 정상이다. 다음 단계를 막지 않는다.
-// 이 백엔드는 RSSI가 보정 내내 한 값이면 문턱이 6~9로 나올 수 있다(11/7 2차: RX-301 7.2, RX-COR 9.6, RX-302 2.3).
-// 그래서 문턱과 판정 수는 참고로만 보여 주고, 값이 없으면 '확인할 수 없음'으로 둔다.
-export function calibrationIssue(_r: { ok?: boolean; windows?: number; tau?: number }): string | null {
+// 보정 점검(11/8 다시 켬). 이 브랜치의 백엔드에는 RSSI 척도 바닥값(0.05 dB)이 들어 있어서 빈 방이면 문턱이 2 안팎이다.
+// 고침이 없던 서버에서는 RSSI가 보정 내내 한 값이면 문턱이 6~9로 나왔지만(11/7 2차: RX-301 7.2, RX-COR 9.6),
+// 이제 문턱이 3을 넘으면 보정 중에 누가 움직였다는 뜻이다. 값을 주지 않는 서버면 점검하지 않는다.
+// 녹화 도우미(scripts/record_live.py)도 같은 기준으로 보정을 한 번 더 한다.
+export function calibrationIssue(r: { ok?: boolean; windows?: number; tau?: number }): string | null {
+  if (!r.ok) return null;
+  if (typeof r.tau === "number" && r.tau > CAL_WARN_TAU) {
+    return `문턱이 ${r.tau.toFixed(1)}로 높아요(정상 2 안팎). 보정하는 동안 방이나 복도에서 누가 움직였을 수 있어요. 이대로면 사람을 잘 못 잡아요.`;
+  }
+  if (typeof r.windows === "number" && r.windows < CAL_MIN_WINDOWS) {
+    return `판정이 ${r.windows}개로 적어요(${CAL_MIN_WINDOWS}개 이상 권장). 일찍 끝냈거나 보정 중에 전송이 끊겼을 수 있어요.`;
+  }
   return null;
 }
 
@@ -31,7 +39,7 @@ export function calibrationNote(r: { ok?: boolean; windows?: number; tau?: numbe
   const windows = r.windows === undefined ? "판정 수 확인할 수 없음" : `판정 ${r.windows}개`;
   const tau = r.tau === undefined ? "문턱 확인할 수 없음" : `문턱 ${r.tau.toFixed(1)}`;
   const fps = r.fps === undefined ? "" : `, 초당 ${r.fps}개`;
-  return `기준선 저장 · 정상 (${windows}, ${tau}${fps})`;
+  return `기준선 저장${calibrationIssue(r) ? "" : " · 정상"} (${windows}, ${tau}${fps})`;
 }
 
 // 이 방식(보정 3분, 상태마다 60초, 문턱에서 누르기)으로 한 시도에 붙이는 이름. 11/7 첫 시험(6번)은 이 이름이 없어 목표에서 빠진다.

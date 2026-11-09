@@ -477,7 +477,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // 동기 녹화는 도우미의 고정된 시작/끝 시각으로 기록한다. 새로고침해도 같은 장면은 한 번만 저장한다.
   useEffect(() => {
-    if (pathname !== "/" || document.visibilityState !== "visible" || dataMode !== "live") return;
+    // 창이 가려지거나 다른 창을 보는 중이어도 장면 라벨을 기록한다(녹화가 멈추지 않게). 실험 화면 경로("/")에서만 한다.
+    if (pathname !== "/" || dataMode !== "live") return;
     if (!rec?.sync || !rec.scene || !rec.started_at || !state || rec.incident_id !== state.incident.id ||
         mock || !historyKey || keyRef.current !== historyKey ||
         (rec.phase !== "recording" && rec.phase !== "between")) return;

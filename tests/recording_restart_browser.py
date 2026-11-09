@@ -114,7 +114,7 @@ def run():
                     assert saw_stopped, "'측정 멈춤' 단계를 보지 못했어요"
                     log.flush()
                     text = (work / "run.log").read_text("utf-8", errors="replace")
-                    assert "보드가 보정 뒤에 다시 켜졌어요" in text and "--day만 새 값" in text, text[-2000:]
+                    assert "보드가 보정 뒤에 다시 켜졌어요" in text and "--day를 새 값" in text and "--start" in text, text[-2000:]
                     assert not list((work / "data").glob("*.json")), list((work / "data").glob("*.json"))
                     headers = {"Authorization": "Bearer " + auth["token"]}
                     sites = page.request.get(api_url + "/api/buildings", headers=headers).json()

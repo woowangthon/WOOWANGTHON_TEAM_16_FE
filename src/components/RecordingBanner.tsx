@@ -63,7 +63,13 @@ export default function RecordingBanner() {
             r.incidentId === rec.incident_id && r.zone === zone.name && r.truthSince === started)) return;
       }
     }
-    // 실제 실험 페이지가 보이고 React가 변경 내용을 그릴 기회를 얻은 뒤에만 확인을 보낸다.
+    // 창이 가려지거나 다른 창·앱을 보는 중이면 브라우저가 그리기(requestAnimationFrame)를 멈춘다.
+    // 그래도 위에서 서버 상태·장면 라벨·저장을 모두 확인했으니, 그리기를 기다리지 않고 바로 확인해 녹화가 멈추지 않게 한다.
+    if (document.visibilityState !== "visible") {
+      void acknowledgeRecording(rec);
+      return;
+    }
+    // 화면이 보이면 React가 변경 내용을 그릴 기회를 얻은 뒤에 확인을 보낸다.
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         if (document.visibilityState === "visible") void acknowledgeRecording(rec);

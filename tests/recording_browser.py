@@ -130,13 +130,13 @@ def run():
                                                       headers=headers).json()
                     assert incident_state["incident"]["source"] == "measurement"
                     assert incident_state["thresholds"] == {"detected": 0.5, "possible": 0.2}
-                    # Simulate losing the visible measurement page during a take.
+                    # Leaving the measurement page during a take no longer stops it: the scene records to the end,
+                    # then the helper waits on "between" until the page is back and has saved the scene records.
                     page.goto(ui_url + "/records")
-                    wait_phase("waiting", 16)
-                    assert not list((work / "data").glob("*.json"))
+                    done = wait_phase("between", 30)
+                    assert done["scene"] == original["scene"] and done["started_at"] == original["started_at"]
+                    assert len(list((work / "data").glob("*.json"))) == 3
                     page.goto(ui_url)
-                    retry = wait_phase("recording")
-                    assert retry["scene"] == original["scene"] and retry["started_at"] > original["started_at"]
                     deadline = time.monotonic() + 60
                     while recorder.poll() is None and time.monotonic() < deadline:
                         page.wait_for_timeout(250)
@@ -149,7 +149,7 @@ def run():
                                              headers={"Authorization": "Bearer " + auth["token"]}).json()
                     assert len(sites) == 1 and sites[0]["active_incident_id"] is None
                     browser.close()
-                    print("PASS: visible-page gate, no-click setup/calibration/detection, dropped-page retake,"
+                    print("PASS: visible-page gate, no-click setup/calibration/detection, take continues off-page,"
                           " six saved results, automatic stop")
             except BaseException:
                 log.flush()

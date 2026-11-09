@@ -9,13 +9,21 @@ watchmate-be의 `tools/collector.py session`을 그대로 실행하고, 녹화 �
       --out ..\\data\\sessions\\2026-11-07d --node RX-301=gw --node RX-302=gw --node RX-COR=gw `
       --countdown 20 --yes --notes "3차 측정"
 
-  - session 옵션은 그대로 쓴다. 여기서만 쓰는 옵션: --api(기본 http://127.0.0.1:8000), --no-live(서버 없이 녹화만).
+  - session 옵션은 그대로 쓴다. 여기서만 쓰는 옵션: --api(기본 http://127.0.0.1:8000), --no-live(서버 없이 녹화만),
+    --calibration-seconds(빈 방 보정 초, 기본 180), --max-tau(보정 문턱 상한, 기본 3.0).
+  - 측정 한 번(보정부터 마지막 장면까지)마다 --day와 --out을 새로 준다(예: 2026-11-08, 2026-11-08b, …).
+    학습은 --day마다 그 측정의 빈 방으로 기준선을 잡고, 측정 하나씩 빼고 채점한다.
   - 서버 로그인: 환경 변수 WATCHMATE_USER·WATCHMATE_PASSWORD, 없으면 watchmate-be/.env의 DEMO_USERNAME·DEMO_PASSWORD,
     그것도 없으면 서버 기본값(demo). 실패하면 비밀번호를 물어본다(화면에 안 보임).
   - 수신기 토큰은 서버에서 새로 받아 이 프로그램 안에서만 쓴다(화면·파일에 남기지 않는다).
   - 실시간 모드에서는 로그인한 로컬 실험 화면을 열고 모든 구역을 비운 뒤 실행한다.
     공간 등록, 빈 방 보정(기본 180초), 감지 시작, 장면 진행 및 종료가 자동이다.
-    화면이 없어지면 진행 중인 장면은 원본에 보존하고 복구 후 같은 장면부터 다시 측정한다.
+    녹화 중에는 화면이 가려지거나 다른 창을 봐도 계속 녹화한다(장면 사이에는 화면 표시를 기다린다).
+    서버 전송이 60초 넘게 끊기면 진행 중인 장면은 원본에 보존하고 같은 장면부터 다시 측정한다.
+  - 보정 문턱이 --max-tau를 넘거나 판정이 적으면 한 번 더 보정하고, 또 그러면 본 측정 없이 멈춘다.
+  - 보정 뒤 첫 빈 방 장면에서 '가능' 이상이 20%를 넘는 보드가 있으면(보정 직후 신호가 움직임) 그 장면 파일을
+    excluded_recal 폴더로 옮기고 다시 보정한 뒤 빈 방 장면부터 다시 찍는다(최대 2번).
+  - 보정 뒤 보드가 다시 켜지면 멈추고, 끊긴 장면부터 이어 찍는 명령(--day·--out 새 값, --start)을 알려 준다.
 """
 
 from __future__ import annotations
@@ -26,11 +34,14 @@ import http.server as http_server
 import importlib.util
 import json
 import os
+import sqlite3
+import subprocess
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
 
@@ -42,6 +53,22 @@ BATCH = 500  # 한 번에 보내는 프레임 수. 크면 서버가 바쁠 때 �
 POST_TIMEOUT = 30.0  # 보정 직후 서버가 기준선을 계산하는 동안(수십 초) 기다린다
 REC_PORT = int(os.environ.get("WATCHMATE_REC_PORT", "8765"))
 WAIT_NOTE_SECONDS = 15  # 화면·수신을 이만큼 넘게 기다리면 무엇을 기다리는지 창에 적는다
+# 보정 점검(화면 src/lib/protocol.ts와 같은 기준). RSSI 척도 바닥값이 있는 서버는 빈 방이면 문턱이 2 안팎이다.
+CAL_MAX_TAU = 3.0  # 이보다 높으면 보정 중에 구역·복도에서 무언가 움직였다
+CAL_MIN_WINDOWS = 60  # 2분 이상 보정에서 판정(2초 창)이 이보다 적으면 문턱이 불안정하다(보정 초의 1/3까지만 요구)
+CAL_TRIES = 2  # 미덥지 않은 보정은 한 번 더 한다
+CAL_RETRY_WAIT = 20  # 다시 보정하기 전에 구역에서 나올 시간(초)
+# 첫 빈 방 점검. 6차 223호는 보정 2~3분 뒤 RSSI가 1dB 내려가 빈 방·옆 구역에서 헛경보가 이어졌다
+# (같은 기록을 3분 늦은 빈 방으로 기준선을 잡으면 거의 다 맞음). 보정 뒤 첫 빈 방 장면에서 '가능' 이상(p ≥ 가능 기준,
+# 지수 평균 0.5·품질 0.7 미만 제외·장면 앞 20초 제외)이 이 비율을 넘는 보드가 있으면 다시 보정하고 빈 방부터 다시 찍는다.
+QUIET_MAX_SHARE = 0.20
+QUIET_TRIES = 2  # 다시 보정하는 최대 횟수. 다 쓰면 경고만 하고 진행한다
+QUIET_SETTLE = 20.0  # 장면 앞 이 초는 세지 않는다(채점과 같음). 짧은 장면은 길이의 1/3
+QUIET_MIN_QUALITY = 0.7
+EXCLUDED_DIR = "excluded_recal"  # 다시 찍게 된 장면 파일을 옮겨 두는 녹화 폴더 안 폴더(채점·학습에서 빠짐)
+# 녹화 중 서버 전송이 이 초보다 오래 끊기면 그 장면을 다시 찍는다. 짧게 끊기면 모아 두었다가 이어서 보내므로 계속 녹화한다.
+# 화면 확인(창이 가려지거나 다른 창을 봄)은 녹화 중에는 멈출 이유로 쓰지 않는다(장면 사이에는 화면 표시를 기다린다).
+DELIVERY_GRACE = 60.0
 NODE_STATUS_KO = {
     ("stale", "restarted"): "다시 켜짐(재보정 필요)",
     ("stale", "low_rate"): "프레임 부족",
@@ -207,6 +234,57 @@ def read_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def server_db() -> Path:
+    """서버와 같은 DB 파일: DATABASE_URL, 없으면 watchmate-be/.env의 값, 그것도 없으면 watchmate-be/data/app.db."""
+    url = os.environ.get("DATABASE_URL", "").strip() or read_env_file(BE / ".env").get("DATABASE_URL", "")
+    if url.startswith("sqlite:///"):
+        path = Path(url[len("sqlite:///"):])
+        return path if path.is_absolute() else BE / path
+    return BE / "data" / "app.db"
+
+
+def utc_epoch(value) -> float:
+    dt = datetime.fromisoformat(str(value).replace("T", " "))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)  # 서버는 UTC로 저장한다
+    return dt.timestamp()
+
+
+def quiet_shares(db: Path, incident_id: int, names: list[str], start: float, end: float,
+                 possible: float) -> dict[str, tuple[float, int]]:
+    """감지 하나에서 [start + 앞부분, end] 동안 보드별 '가능' 이상 비율과 판정 수(채점과 같은 지수 평균·품질 기준)."""
+    settle = min(QUIET_SETTLE, max(0.0, (end - start) / 3))
+    con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True, timeout=10)
+    try:
+        rows = con.execute("select n.name, i.t, i.p_change, i.p_person, i.quality from inferences i "
+                           "join nodes n on n.id = i.node_id where i.incident_id = ? order by i.t",
+                           (incident_id,)).fetchall()
+    finally:
+        con.close()
+    ema: dict[str, float] = {}
+    vals: dict[str, list[float]] = {n: [] for n in names}
+    for name, t, pc, pp, q in rows:
+        p = pp if pp is not None else pc
+        if name not in vals or p is None or (q is not None and q < QUIET_MIN_QUALITY):
+            continue
+        e = ema[name] = p if name not in ema else 0.5 * p + 0.5 * ema[name]
+        if start + settle <= utc_epoch(t) <= end:
+            vals[name].append(e)
+    return {n: ((sum(x >= possible for x in v) / len(v)) if v else 0.0, len(v)) for n, v in vals.items()}
+
+
+def set_aside(saved: dict) -> Path | None:
+    """다시 찍을 장면 파일(.csv·.json)을 녹화 폴더 안 excluded_recal로 옮긴다. 지우지 않는다."""
+    dest = None
+    for path, _frames, _took in saved.values():
+        dest = Path(path).parent / EXCLUDED_DIR
+        dest.mkdir(exist_ok=True)
+        for p in (Path(path), Path(path).with_suffix(".json")):
+            if p.exists():
+                p.replace(dest / p.name)
+    return dest
+
+
 def login(api: str) -> str:
     env = read_env_file(BE / ".env")
     user = os.environ.get("WATCHMATE_USER") or env.get("DEMO_USERNAME") or "demo"
@@ -360,14 +438,20 @@ class NodeRestarted(Exception):
 
 
 class Measurement:
-    def __init__(self, rec, api, token, site, names, calibration_seconds, tee):
+    def __init__(self, rec, api, token, site, names, calibration_seconds, tee, max_tau=CAL_MAX_TAU):
         self.rec, self.api, self.token = rec, api, token
         self.site_url = f"{api}/api/buildings/{site['id']}"
         self.names = names
         self.calibration_seconds = calibration_seconds
+        self.max_tau = max_tau
         self.tee = tee
         self.incident_id = None
         self.restart_base: dict[str, int] | None = None  # 보정을 마쳤을 때 보드별 재시작 횟수
+        self.quiet_left = QUIET_TRIES  # 첫 빈 방 점검으로 다시 보정할 수 있는 남은 횟수
+        self.quiet_done = False
+        self.cal_running = False  # 서버에 이 실행이 시작한 보정이 돌고 있는지
+        self.lost_since: float | None = None  # 녹화 중 서버 전송이 끊긴 시각
+        self.screen_gone = False  # 녹화 중 화면 확인이 끊겼다고 이미 알렸는지
         self.rec.update(building_id=site["id"])
 
     def wait(self, capture, phase, message, **changes):
@@ -420,35 +504,39 @@ class Measurement:
                 reasons.append("서버 상태를 읽지 못했어요")
         say(f"  … {waited:.0f}초째 기다리는 중: " + ("; ".join(reasons) if reasons else "화면이 이 단계를 그리기를 기다려요"))
 
-    def prepare(self, capture, countdown):
-        self.wait(capture, "preparing", "빈 방 보정 준비 · 모든 구역을 비우고 실험 진행 화면을 열어 두세요.")
+    def prepare(self, capture, countdown, reason: str = ""):
+        self.wait(capture, "preparing", (reason + " " if reason else "")
+                  + "빈 방 보정 준비 · 모든 구역을 비우고 실험 진행 화면을 열어 두세요.")
         capture.wait(countdown)
         while not all(self.tee.sent[n] for n in self.names):
             capture.wait(0.25)
-        self.wait(capture, "calibrating", "빈 방 기준선을 자동 보정합니다. 감지가 시작될 때까지 밖에서 기다리세요.")
-        restarts_before = self.restart_counts()
-        detail = http("POST", self.site_url + "/calibration/start", self.token,
-                      {"duration_seconds": self.calibration_seconds}, timeout=90)
-        run_id = detail["calibration"]["id"]
-        while detail["calibration"]["status"] == "running":
-            capture.wait(1)
-            try:
-                detail = http("GET", self.site_url, self.token, timeout=90)
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
-                if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
-                    raise
-                continue
-            if not detail["calibration"] or detail["calibration"]["id"] != run_id:
-                sys.exit("다른 보정이 시작되었습니다. 이번 측정을 중단합니다.")
-        results = detail["calibration"]["result"] or {}
-        valid = {r.get("node") for r in results.values() if isinstance(r, dict) and r.get("ok")}
-        missing = sorted(set(self.names) - valid)
-        if missing:
-            sys.exit(f"이번 빈 방 보정에 실패했습니다: {', '.join(missing)}. 본 측정은 시작하지 않았습니다.")
-        restarts_after = self.restart_counts()
-        during = sorted(n for n, c in restarts_after.items() if c > restarts_before.get(n, c))
-        if during:
-            raise NodeRestarted(during, during_calibration=True)
+        message = "빈 방 기준선을 자동 보정합니다. 감지가 시작될 때까지 밖에서 기다리세요."
+        for attempt in range(1, CAL_TRIES + 1):
+            self.wait(capture, "calibrating", message)
+            restarts_before = self.restart_counts()
+            results = self.calibrate(capture)
+            valid = {r.get("node") for r in results.values() if isinstance(r, dict) and r.get("ok")}
+            missing = sorted(set(self.names) - valid)
+            if missing:
+                sys.exit(f"이번 빈 방 보정에 실패했습니다: {', '.join(missing)}. 본 측정은 시작하지 않았습니다.")
+            restarts_after = self.restart_counts()
+            during = sorted(n for n, c in restarts_after.items() if c > restarts_before.get(n, c))
+            if during:
+                raise NodeRestarted(during, during_calibration=True)
+            say("  보정 결과: " + self.calibration_summary(results))
+            issues = self.calibration_issues(results)
+            if not issues:
+                break
+            if attempt == CAL_TRIES:
+                sys.exit(f"빈 방 보정이 {CAL_TRIES}번 모두 미덥지 않았어요({', '.join(issues)}). 본 측정은 시작하지 않았어요.\n"
+                         "  빈 방이면 문턱은 2 안팎이에요. 보정하는 동안 구역·복도에서 움직인 사람이나 물건(문, 선풍기)이\n"
+                         "  없었는지 확인하고 같은 명령으로 다시 실행하세요. 아직 찍은 장면이 없어서 --day는 그대로 써도 돼요.\n"
+                         "  아무도 없는데도 문턱이 계속 높으면 --max-tau 4처럼 기준을 올려 진행할 수 있어요(그만큼 사람을 덜 잡아요).")
+            self.wait(capture, "calibrating",
+                      f"보정이 미덥지 않아요({', '.join(issues)}). 빈 방이면 문턱은 2 안팎이에요. "
+                      f"모두 구역 밖에 있는지 확인하세요. {CAL_RETRY_WAIT}초 뒤 한 번 더 보정합니다.")
+            capture.wait(CAL_RETRY_WAIT)
+            message = "빈 방 기준선을 한 번 더 보정합니다. 감지가 시작될 때까지 밖에서 기다리세요."
         self.restart_base = restarts_after
         self.wait(capture, "starting", "보정 완료 · 화면과 연결한 뒤 감지를 시작합니다.")
         incident = http("POST", self.site_url + "/incidents", self.token,
@@ -458,7 +546,120 @@ class Measurement:
         self.incident_id = incident["id"]
         self.rec.update(incident_id=self.incident_id)
 
+    def calibrate(self, capture) -> dict:
+        """빈 방 보정을 한 번 하고, 끝나면 수신기별 결과(ok, windows, tau, fps)를 돌려준다."""
+        detail = http("POST", self.site_url + "/calibration/start", self.token,
+                      {"duration_seconds": self.calibration_seconds}, timeout=90)
+        run_id = detail["calibration"]["id"]
+        self.cal_running = True  # 보정 중에 멈추면 close()가 서버 보정도 멈춘다(남아 있으면 다음 실행이 막힘)
+        while detail["calibration"]["status"] == "running":
+            capture.wait(1)
+            try:
+                detail = http("GET", self.site_url, self.token, timeout=90)
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+                    raise
+                continue
+            if not detail["calibration"] or detail["calibration"]["id"] != run_id:
+                self.cal_running = False
+                sys.exit("다른 보정이 시작되었습니다. 이번 측정을 중단합니다.")
+        self.cal_running = False
+        return detail["calibration"]["result"] or {}
+
+    def my_results(self, results: dict) -> list[dict]:
+        rows = [r for r in results.values() if isinstance(r, dict) and r.get("node") in self.names]
+        return sorted(rows, key=lambda r: r["node"])
+
+    def calibration_issues(self, results: dict) -> list[str]:
+        """미덥지 않은 수신기: 문턱이 --max-tau보다 높거나, 2분 이상 보정인데 판정(2초 창)이 적다."""
+        min_windows = min(CAL_MIN_WINDOWS, self.calibration_seconds // 3) if self.calibration_seconds >= 120 else 0
+        issues = []
+        for r in self.my_results(results):
+            tau, windows = r.get("tau"), r.get("windows")
+            if isinstance(tau, (int, float)) and tau > self.max_tau:
+                issues.append(f"{r['node']} 문턱 {tau:.1f}")
+            elif isinstance(windows, int) and windows < min_windows:
+                issues.append(f"{r['node']} 판정 {windows}개")
+        return issues
+
+    def calibration_summary(self, results: dict) -> str:
+        parts = []
+        for r in self.my_results(results):
+            tau = r.get("tau")
+            parts.append(f"{r['node']} 문턱 {tau:.1f}·판정 {r.get('windows', '?')}개" if isinstance(tau, (int, float))
+                         else f"{r['node']} {'성공' if r.get('ok') else '실패'}")
+        return ", ".join(parts)
+
+    def recording_stalled(self) -> bool:
+        """녹화 중 점검. 화면 확인이 끊겨도 녹화는 계속하고(한 번만 알림), 서버 전송이 DELIVERY_GRACE초 넘게 끊기면 True."""
+        present = self.rec.screen_present()
+        if not present and not self.screen_gone:
+            say("\n  (실험 화면 확인이 끊겼어요 · 창이 가려졌거나 다른 창을 보는 중 · 녹화는 계속해요)")
+        self.screen_gone = not present
+        if self.receiving():
+            self.lost_since = None
+            return False
+        now = time.time()
+        if self.lost_since is None:
+            self.lost_since = now
+            say("\n  (서버 전송이 잠깐 끊겼어요 · 녹화는 계속하고, 다시 되면 모아 둔 신호를 이어서 보내요)")
+        return now - self.lost_since > DELIVERY_GRACE
+
+    def wants_quiet_check(self, labels: dict) -> bool:
+        """보정 뒤 첫 빈 방 장면(모든 보드 라벨이 empty)인지."""
+        return not self.quiet_done and bool(labels) and all(v == "empty" for v in labels.values())
+
+    def possible_p(self) -> float:
+        try:
+            st = http("GET", f"{self.api}/api/incidents/{self.incident_id}/state", self.token, timeout=5)
+            return float(st["thresholds"]["possible"])
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError):
+            return 0.20
+
+    def quiet_issues(self, start: float, end: float) -> list[str]:
+        """첫 빈 방 장면에서 '가능' 이상이 QUIET_MAX_SHARE를 넘은 보드. 읽지 못하면 빈 목록(점검 건너뜀)."""
+        if os.environ.get("WATCHMATE_FORCE_RECAL") == "1" and self.quiet_left == QUIET_TRIES:
+            say("  첫 빈 방 점검: 시험용으로 한 번 다시 보정합니다(WATCHMATE_FORCE_RECAL=1).")
+            return ["시험용 강제 재보정"]
+        db = server_db()
+        if not db.exists():
+            say(f"  첫 빈 방 점검: 서버 DB({db})를 찾지 못해 건너뜁니다.")
+            return []
+        try:
+            shares = quiet_shares(db, self.incident_id, self.names, start, end, self.possible_p())
+        except sqlite3.Error as exc:
+            say(f"  첫 빈 방 점검: 서버 기록을 읽지 못해 건너뜁니다({exc}).")
+            return []
+        parts, issues = [], []
+        for n, (share, count) in shares.items():
+            if not count:
+                parts.append(f"{n} 판정 없음")
+                continue
+            parts.append(f"{n} '가능' 이상 {share:.0%}")
+            if share > QUIET_MAX_SHARE:
+                issues.append(f"{n} '가능' 이상 {share:.0%}")
+        say("  첫 빈 방 점검(보정 직후 신호가 움직였는지): " + " · ".join(parts) + ("" if issues else " → 통과"))
+        return issues
+
+    def recalibrate(self, capture, countdown, issues: list[str]) -> None:
+        """감지를 닫고 지금 빈 방으로 다시 보정한 뒤 새 감지를 연다(첫 빈 방 장면은 다시 찍는다)."""
+        self.quiet_left -= 1
+        reason = f"보정 직후 빈 방에서 흔들린 보드({', '.join(issues)})가 있어 기준선을 다시 잡습니다."
+        say(f"  ✗ {reason}\n    방금 빈 방 장면 파일은 {EXCLUDED_DIR} 폴더로 옮겼어요(지우지 않음). "
+            "다시 보정한 뒤 빈 방 장면부터 다시 찍습니다. 모두 구역 밖에 그대로 계세요.")
+        self.close()
+        self.incident_id = None
+        self.rec.update(incident_id=None)
+        self.restart_base = None
+        self.prepare(capture, countdown, reason)
+
     def close(self):
+        if self.cal_running:  # 보정 도중 멈춤(Ctrl+C 등): 서버 보정도 멈춘다
+            try:
+                http("POST", self.site_url + "/calibration/stop", self.token, timeout=30)
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
+            self.cal_running = False
         if self.incident_id:
             http("POST", f"{self.api}/api/incidents/{self.incident_id}/close", self.token, timeout=60)
 
@@ -485,11 +686,66 @@ def node_names(argv: list[str]) -> list[str]:
     return names
 
 
+def next_day(day: str) -> str:
+    """측정 이름의 끝 글자를 다음 것으로: 2026-11-08 → 2026-11-08b, 2026-11-08b → 2026-11-08c."""
+    if not day:
+        return time.strftime("%Y-%m-%d") + "b"
+    if len(day) > 1 and "a" <= day[-1] < "z" and not day[-2].isalpha():
+        return day[:-1] + chr(ord(day[-1]) + 1)
+    return day + "b"
+
+
+def with_options(argv: list[str], changes: dict[str, str]) -> list[str]:
+    """명령 인자에서 옵션 값만 바꾼다(--name 값, --name=값 둘 다). 없던 옵션은 뒤에 붙인다."""
+    out, seen, i = [], set(), 0
+    while i < len(argv):
+        name = argv[i].split("=", 1)[0]
+        if name in changes:
+            out += [name, changes[name]]
+            seen.add(name)
+            i += 1 if "=" in argv[i] else 2
+            continue
+        out.append(argv[i])
+        i += 1
+    for name, value in changes.items():
+        if name not in seen:
+            out += [name, value]
+    return out
+
+
+def restart_guidance(exc: NodeRestarted, stopped_at: tuple[str, int], plan: list[dict], argv: list[str]) -> str:
+    """보드가 다시 켜진 뒤 다시 찍는 방법. 끝난 장면은 그대로 두고, 끊긴 장면부터 새 --day로 이어 찍는다."""
+    lines = ["  다시 하려면",
+             "    1. 보드 전원(충전기·케이블)을 확인합니다.",
+             "    2. 측정 구역을 비우고 실험 진행 화면을 열어 둡니다."]
+    phase, index = stopped_at
+    if exc.during_calibration or index < 0:
+        lines.append("    3. 같은 명령을 그대로 다시 실행합니다. 아직 찍은 장면이 없어서 --day는 그대로 써도 돼요.")
+        return "\n".join(lines)
+    start = index + 1 if phase == "between" else index  # 'between'이면 그 장면은 저장까지 끝났다
+    if start >= len(plan):
+        return "  마지막 장면까지 저장했어요. 이번 측정은 다시 찍지 않아도 돼요."
+    if not any(all(v == "empty" for v in p["labels"].values()) for p in plan[start:]):
+        start = 0  # 남은 장면에 빈 방이 없으면 새 --day의 빈 방 기준을 잡을 수 없어서 처음부터 찍는다
+    day, out = opt_value(argv, "--day") or "", Path(opt_value(argv, "--out") or "sessions")
+    new_day = next_day(day)
+    while (out.parent / new_day).exists():
+        new_day = next_day(new_day)
+    changes = {"--day": new_day, "--out": str(out.parent / new_day), "--start": plan[start]["scene"]}
+    cmd = subprocess.list2cmdline([sys.executable, sys.argv[0], *with_options(sys.argv[1:], changes)])
+    lines += [f"    3. {plan[start]['scene']} 장면부터 찍습니다. --day를 새 값({new_day})으로, --out을 새 폴더로 바꾼 명령이에요"
+              + ("(--start로 끝난 장면은 건너뛰어요):" if start > 0 else ":"),
+              f"       {cmd}",
+              "       빈 방 보정부터 다시 해요. 같은 --day에 섞으면 보드가 다시 켜지기 전 기준선과 맞지 않아요."]
+    return "\n".join(lines)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--api", default=os.environ.get("WATCHMATE_API", "http://127.0.0.1:8000"))
     ap.add_argument("--no-live", action="store_true")
     ap.add_argument("--calibration-seconds", type=int, default=180, choices=range(20, 601), metavar="20..600")
+    ap.add_argument("--max-tau", type=float, default=CAL_MAX_TAU)
     args, rest = ap.parse_known_args()
     api = args.api.rstrip("/")
     col = load_collector()
@@ -520,13 +776,25 @@ def main() -> None:
             try:
                 saved = orig_record_scene(sers, labels, seconds, countdown, out, day_, meta_extra, capture)
             except ScreenLost:
-                say("화면 연결이 끊겼습니다. 연속 원본을 보존하고 화면 복구 후 이 장면을 다시 측정합니다.")
+                say(f"서버 전송이 {DELIVERY_GRACE:.0f}초 넘게 끊겼습니다. 연속 원본을 보존하고 연결이 돌아오면 이 장면을 다시 측정합니다.")
+                if measurement:
+                    measurement.lost_since = None
                 continue
             finished = rec.data["started_at"] + next(iter(saved.values()))[2]
             rec.update(phase="between", phase_started=finished, finished_at=finished,
                        phase_seconds=0.0, message="장면 종료 · 화면 기록 저장 확인 중")
             if measurement:
                 measurement.wait_screen(capture)
+                if measurement.wants_quiet_check(labels):
+                    issues = measurement.quiet_issues(rec.data["started_at"], finished)
+                    if issues and measurement.quiet_left > 0:
+                        set_aside(saved)
+                        measurement.recalibrate(capture, countdown, issues)
+                        continue
+                    if issues:
+                        say(f"  ! 다시 보정을 {QUIET_TRIES}번 했는데도 빈 방에서 흔들려요({', '.join(issues)}). 그대로 진행합니다.\n"
+                            "    끝난 뒤 그 보드를 몇 cm 옮기거나 문·의자·전원 상태를 확인하세요.")
+                    measurement.quiet_done = True
             return saved
 
     col._record_scene = record_scene
@@ -545,7 +813,7 @@ def main() -> None:
             super().wait(seconds)
             if measurement:
                 measurement.check_restarts()  # 녹화 중이면 장면을 지우고 끝낸다(다시 찍어도 판단할 수 없음)
-            if measurement and rec.data["phase"] == "recording" and (not rec.screen_present() or not measurement.receiving()):
+            if measurement and rec.data["phase"] == "recording" and measurement.recording_stalled():
                 raise ScreenLost()
 
     col.RecordingArchive = SceneArchive
@@ -572,7 +840,7 @@ def main() -> None:
         if not tokens:
             sys.exit("  ✗ 서버 실험 공간에 녹화할 수신기 이름이 없어요. 화면 2단계 등록과 --node 이름을 맞춰 주세요.")
         tee = LiveTee(col, api, tokens)
-        measurement = Measurement(rec, api, token, site, names, args.calibration_seconds, tee)
+        measurement = Measurement(rec, api, token, site, names, args.calibration_seconds, tee, args.max_tau)
         base = col.RecordingArchive
 
         class LiveRecordingArchive(base):  # type: ignore[misc, valid-type]
@@ -590,10 +858,12 @@ def main() -> None:
         if "--yes" not in rest:
             rest.append("--yes")
     restarted: NodeRestarted | None = None
+    stopped_at = ("", -1)  # 멈춘 때의 단계와 장면 번호(이어 찍을 장면을 정한다)
     try:
         col.main(["session", *rest])
     except NodeRestarted as exc:
         restarted = exc
+        stopped_at = (rec.data["phase"], rec.data["index"])
         when = "보정 중에" if exc.during_calibration else "보정 뒤에"
         rec.update(phase="stopped", phase_started=time.time(), phase_seconds=0.0,
                    message=f"{exc} 보드가 {when} 다시 켜져 측정을 멈췄어요. 녹화 도우미 창의 안내를 따라 주세요.")
@@ -616,12 +886,8 @@ def main() -> None:
         when = "보정 중에" if restarted.during_calibration else "보정 뒤에"
         say(f"\n  ✗ {restarted} 보드가 {when} 다시 켜졌어요(전원이 잠깐 빠졌을 수 있어요).\n"
             "    보드가 신호 크기 기준을 새로 잡아서, 이번 빈 방 기준선으로는 판단할 수 없어요.\n"
-            "    진행 중이던 장면은 지웠고 감지를 닫았어요. 끝난 장면 파일과 연속 원본은 남아 있어요.\n"
-            "  다시 하려면\n"
-            "    1. 보드 전원(충전기·케이블)을 확인합니다.\n"
-            "    2. 측정 구역을 비우고 실험 진행 화면을 열어 둡니다.\n"
-            f"    3. 같은 명령을 --day만 새 값(예: {day or '2026-11-08'}b)으로 바꿔 다시 실행합니다.\n"
-            "       빈 방 보정부터 첫 장면까지 다시 찍어요. 같은 --day에 섞으면 기준선이 맞지 않아요.")
+            "    진행 중이던 장면은 지웠고 감지를 닫았어요. 끝난 장면 파일과 연속 원본은 남아 있어요.")
+        say(restart_guidance(restarted, stopped_at, plan, rest))
         sys.exit(2)
 
 
