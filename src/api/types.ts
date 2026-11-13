@@ -131,6 +131,19 @@ export interface CalibrationNodeResult {
   tau?: number; // 이 기준선의 감지 문턱(빈 방 점수 상위 1%, 최저 2.0)
 }
 
+// 보정 중인 보드의 지금 상태(2초 구간마다). 흔들림은 이번 보정의 중간값을 1로 본 배수다.
+export interface CalibrationLive {
+  windows: number;
+  fps: number;
+  rssi: number | null;
+  rssi_start: number | null;
+  rssi_min: number | null;
+  rssi_max: number | null;
+  wobble: number | null;
+  loud: number;
+  series: (number | null)[];
+}
+
 export interface Calibration {
   id: number;
   status: "running" | "done" | "failed";
@@ -138,7 +151,7 @@ export interface Calibration {
   ends_at: string;
   finished_at: string | null;
   result: Record<string, CalibrationNodeResult> | null;
-  progress: Record<string, { frames: number; seconds: number }> | null;
+  progress: Record<string, { frames: number; seconds: number; live?: CalibrationLive | null }> | null;
 }
 
 export interface BuildingDetail extends BuildingSummary {

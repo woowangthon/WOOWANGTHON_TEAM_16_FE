@@ -448,9 +448,42 @@ export default function RunPage() {
             <ul className="grid gap-2 text-sm sm:grid-cols-3">
               {Object.entries(cal.progress).map(([id, p]) => {
                 const name = building?.nodes.find((n) => String(n.id) === id)?.name ?? `노드 ${id}`;
+                const live = p.live ?? null;
+                const drift = live && live.rssi != null && live.rssi_start != null ? live.rssi - live.rssi_start : null;
+                const drifted = drift != null && Math.abs(drift) >= 0.5;
+                const moving = live?.wobble != null && live.wobble >= 1.5;
                 return (
-                  <li key={id} className="rounded-xl border border-slate-200 px-4 py-2.5 tabular">
+                  <li key={id} className={`rounded-xl border px-4 py-2.5 tabular ${moving || drifted ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
                     <b>{name}</b> · 프레임 {p.frames.toLocaleString()}개{p.frames === 0 ? " · 아직 안 들어옴" : ` · ${p.seconds}초 분량`}
+                    {live ? (
+                      <div className="mt-1.5 space-y-1 text-xs text-slate-600">
+                        <div>
+                          초당 {live.fps.toFixed(0)}개 · 신호 {live.rssi != null ? `${live.rssi.toFixed(1)}dBm` : "?"}
+                          {drift != null ? (
+                            <span className={drifted ? "font-semibold text-amber-800" : ""}> (시작보다 {drift >= 0 ? "+" : ""}{drift.toFixed(1)})</span>
+                          ) : null}
+                        </div>
+                        <div className="flex items-end gap-px" style={{ height: 28 }} aria-hidden="true">
+                          {live.series.map((v, i) => (
+                            <span
+                              key={i}
+                              className={v != null && v >= 1.5 ? "bg-amber-500" : "bg-emerald-500"}
+                              style={{ width: 3, height: `${Math.round(Math.min(1, (v ?? 1) / 3) * 100)}%`, minHeight: 2 }}
+                            />
+                          ))}
+                        </div>
+                        <div>
+                          {live.wobble == null ? (
+                            "흔들림 기준 잡는 중(10초)"
+                          ) : (
+                            <>
+                              흔들림 평소의 <b className={moving ? "text-amber-800" : "text-emerald-700"}>{live.wobble.toFixed(1)}배</b> · {moving ? "움직임 있음" : "조용함"}
+                              {live.loud > 0 ? ` · 흔들린 구간 ${live.loud}번` : ""}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}
