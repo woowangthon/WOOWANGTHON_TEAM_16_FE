@@ -237,7 +237,7 @@ body.nocaps #caps { display: none; }
         <select id="leftMode" title="왼쪽 화면"><option value="demo">시연 화면</option><option value="site">사이트 그대로</option></select>
         <select id="dataMode" title="판정 데이터"><option value="live">실시간</option><option value="replay">기록 재생(예시)</option></select>
         <select id="view" title="평면도 모양"><option value="3d">평면도 3D</option><option value="2d">평면도 2D</option></select>
-        <select id="words" title="표현"><option value="who">사람 있음·비어 있음</option><option value="change">변화 큼·없음</option></select>
+        <select id="words" title="표현"><option value="who">사람 있음·감지 안 됨</option><option value="change">변화 큼·없음</option></select>
         <select id="fit" title="카메라 맞춤"><option value="contain">카메라 전체</option><option value="cover">카메라 꽉 차게</option></select>
       </div>
       <div class="row" style="margin-top:4px">
@@ -308,7 +308,8 @@ const zoneRect = (z) => {  // 구역 네모 [x0, x1, y0, y1](미터)
 const hasXY = (n) => n.mx != null || n.x != null;
 const nodeXY = (n) => (n.mx != null ? [n.mx, n.my] : fromNorm(n.x, n.y));
 const WORDS = {
-  who: { detected: "사람 있음", possible: "확인 중", not_detected: "비어 있음", meter: "감지 신호" },
+  // '감지 안 됨'은 기척이 잡히지 않았다는 뜻이지 사람이 없다는 보장이 아니다(가만히 누운 사람은 놓칠 수 있다)
+  who: { detected: "사람 있음", possible: "확인 중", not_detected: "감지 안 됨", meter: "감지 신호" },
   change: { detected: "변화 큼", possible: "변화 가능", not_detected: "변화 없음", meter: "신호 변화" },
 };
 const OTHER = { idle: "대기", no_signal: "신호 없음", warming: "준비 중", uncalibrated: "보정 전", no_sensor: "보드 없음" };
@@ -418,7 +419,7 @@ function renderHero(d) {
       sub = "신호가 조금 달라졌어요. 계속 지켜보는 중";
     } else if (zs.every((z) => z.state === "not_detected")) {
       cls = "h-empty"; icon = ICON.check;
-      text = who ? "모든 구역이 비어 있어요" : "모든 구역 변화 없음";
+      text = who ? "지금 감지된 사람이 없어요" : "모든 구역 변화 없음";
       sub = events.length ? `마지막 변화 ${hms(events[0].t)}` : "빈 방 기준과 같아요";
     }
   } else if (d.ok === false) { sub = "판정 서버와 수집기를 켜면 여기에 바로 보여요"; }
@@ -459,7 +460,7 @@ function renderLive(d) {
       const ze = zoneEls[z.id], c = cardEls[z.id];
       if (!ze || !c) continue;
       const judged = ["detected", "possible", "not_detected"].includes(z.state);
-      // 변화 기록에는 '있음'과 '비어 있음'으로 확정된 순간만 남긴다('확인 중'을 오가는 것은 적지 않는다)
+      // 변화 기록에는 '있음'과 '감지 안 됨'으로 정해진 순간만 남긴다('확인 중'을 오가는 것은 적지 않는다)
       if (z.state === "detected" || z.state === "not_detected") {
         if (prevState[z.id] && prevState[z.id] !== z.state) events.unshift({ t: z.since || d.t, zone: z.name, state: z.state });
         prevState[z.id] = z.state;

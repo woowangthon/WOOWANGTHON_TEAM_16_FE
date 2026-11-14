@@ -188,7 +188,7 @@ function applySite(site) {  // 장소 정보(site.json)가 오면 그 장소 도
   const w = CROP.x1 - CROP.x0, h = CROP.y1 - CROP.y0;
   K = Math.min(740 / w, 540 / h); OX = (740 - w * K) / 2; OY = (540 - h * K) / 2;
 }
-const WORD = { detected: "사람 있음", possible: "확인 중", not_detected: "비어 있음", idle: "대기", no_signal: "신호 없음", warming: "준비 중", uncalibrated: "보정 전" };
+const WORD = { detected: "사람 있음", possible: "확인 중", not_detected: "감지 안 됨", idle: "대기", no_signal: "신호 없음", warming: "준비 중", uncalibrated: "보정 전" };
 const NS = "http://www.w3.org/2000/svg";
 const sv = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
 let miniKey = "", miniEls = {};
@@ -227,7 +227,7 @@ async function pollLive() {
     if (d.ok && d.active && zs.length) {
       if (det.length) { cls = "h-detected"; head = det.join("·") + "에 사람이 있어요"; }
       else if (pos.length) { cls = "h-possible"; head = pos.join("·") + " 확인 중"; }
-      else if (zs.every((z) => z.state === "not_detected")) { cls = "h-empty"; head = "모든 구역이 비어 있어요"; }
+      else if (zs.every((z) => z.state === "not_detected")) { cls = "h-empty"; head = "지금 감지된 사람이 없어요"; }
     }
     $("live").className = cls;
     $("liveHead").textContent = head;
