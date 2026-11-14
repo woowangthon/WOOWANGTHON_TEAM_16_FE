@@ -81,7 +81,7 @@ export default function LoginPage() {
                 테스트 계정은 백엔드 <code>.env</code>의 DEMO_USERNAME·DEMO_PASSWORD예요(설정 안 했으면 demo / demo1234).{" "}
               </>
             ) : (
-              "팀에서 정한 테스트 계정으로 로그인하세요. "
+              "테스트 계정으로 로그인하면 첫 화면에서 실제 측정 녹화를 바로 재생해 볼 수 있어요. "
             )}
             연결 대상: {API_LABEL}
           </p>
@@ -89,6 +89,9 @@ export default function LoginPage() {
         <button type="button" onClick={enterMock} className="mt-4 w-full text-center text-sm text-slate-500 underline hover:text-slate-800">
           서버 없이 UI 예시(가상 데이터)로 보기
         </button>
+        <p className="mt-1 text-center text-xs leading-relaxed text-slate-500">
+          UI 예시는 화면 모양만 보여 주는 가상 데이터예요. 실제 판정 결과가 아니에요.
+        </p>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import ExperimentPanel from "../components/ExperimentPanel";
 import GoalTracker from "../components/GoalTracker";
 import { PredLegend, TruthLegend } from "../components/Legends";
 import PlanView, { planBackground, planFromState } from "../components/PlanView";
+import QuickReplay from "../components/QuickReplay";
 import SpaceCard from "../components/SpaceCard";
 import { StepCard, type StepStatus } from "../components/Step";
 import Timeline from "../components/Timeline";
@@ -187,6 +188,8 @@ export default function RunPage() {
           </div>
         </div>
       ) : null}
+
+      {online && !mock && !replaying && !detecting && !calRunning ? <QuickReplay /> : null}
 
       {!mock && !replaying ? (
         <div className="mb-6 rounded-2xl bg-white px-5 py-4 ring-1 ring-slate-200">
