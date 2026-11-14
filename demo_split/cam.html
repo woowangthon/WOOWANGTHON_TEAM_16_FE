@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>와치메이트 현장 카메라</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root { --bg: #0e0f11; --panel: #17181b; --ink: #f2f1ee; --muted: #a3a29b; --line: rgba(255,255,255,.14);
+  --accent: #3987e5; --danger: #e34948; --ok: #1baf7a; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--ink);
+  font: 16px/1.4 "Pretendard Variable", Pretendard, system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+/* 한 화면 안에 도면(위)과 카메라(아래)가 다 보이게 한다. 스크롤 없음, 카메라는 잘리지 않게 전체를 보여 준다 */
+main { height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 10px calc(8px + env(safe-area-inset-bottom)); }
+button { font: inherit; font-size: 14px; color: var(--ink); background: #222327; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-height: 40px; white-space: nowrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; font-size: 17px; padding: 12px 22px; }
+#live { flex: none; padding: 8px 10px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+#live .k { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; overflow: hidden; }
+#live .head { font-size: 20px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#live.h-detected .head { color: #ff8f76; } #live.h-possible .head { color: #f5b83d; } #live.h-empty .head { color: #2dd4a7; }
+#mini { display: block; width: 100%; height: 27vh; height: 27dvh; border-radius: 10px; background: #0b0d10; }
+#camBox { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 14px; overflow: hidden; }
+#v { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+#start { position: relative; z-index: 1; }
+#err { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 2; padding: 10px 12px; border-radius: 10px; background: rgba(120,30,30,.92); display: none; font-size: 14px; }
+#foot { flex: none; display: flex; align-items: center; gap: 8px; min-height: 40px; }
+#stat { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--panel); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: none; }
+#stat.bad { background: rgba(227,73,72,.2); white-space: normal; }
+#tools { display: none; gap: 6px; }
+@media (orientation: landscape) {  /* 눕히면 왼쪽 도면, 오른쪽 카메라 */
+  main { display: grid; grid-template-columns: 42% 1fr; grid-template-rows: 1fr auto; }
+  #live { grid-row: 1; grid-column: 1; display: flex; flex-direction: column; min-height: 0; }
+  #mini { flex: 1; min-height: 0; height: auto; }
+  #camBox { grid-row: 1; grid-column: 2; }
+  #foot { grid-row: 2; grid-column: 1 / -1; }
+}
+#mini .room { fill: #171b22; stroke: #2e3541; stroke-width: 1.3; }
+#mini .cor { fill: #101318; }
+#mini .zone rect { fill: rgba(255,255,255,.03); stroke: #3a4250; stroke-width: 2.5; transition: fill .5s, stroke .5s; }
+#mini .zn { fill: #f2f1ee; font-size: 30px; font-weight: 800; text-anchor: middle; }
+#mini .zs { fill: #8b93a1; font-size: 21px; font-weight: 700; text-anchor: middle; }
+#mini .s-not_detected rect { fill: rgba(45,212,167,.09); stroke: rgba(45,212,167,.6); } #mini .s-not_detected .zs { fill: #2dd4a7; }
+#mini .s-possible rect { fill: rgba(245,184,61,.2); stroke: #f5b83d; } #mini .s-possible .zs { fill: #f5b83d; }
+#mini .s-detected rect { fill: rgba(255,107,74,.34); stroke: #ff6b4a; stroke-width: 4; } #mini .s-detected .zs { fill: #ff9a84; }
+</style>
+</head>
+<body>
+<main>
+  <div id="live">
+    <div class="k"><span>와치메이트 · 실시간 판정</span><span id="liveNote"></span></div>
+    <div class="head" id="liveHead">연결하는 중</div>
+    <svg id="mini" viewBox="0 0 740 540" preserveAspectRatio="xMidYMid meet" role="img" aria-label="구역별 실시간 판정 도면"></svg>
+  </div>
+  <div id="camBox">
+    <video id="v" playsinline muted autoplay></video>
+    <button class="primary" id="start">카메라 시작</button>
+    <div id="err"></div>
+  </div>
+  <div id="foot">
+    <div id="stat"></div>
+    <div id="tools">
+      <button id="flip">카메라 전환</button>
+      <button id="stop">멈추기</button>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search), key = q.get("k") || "", test = q.get("test") === "1";
+const v = $("v"), canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+let stream = null, facing = "environment", running = false, runId = 0, wake = null;
+const maxSide = 960, quality = 0.72;  // 화질은 '보통'으로 고정(긴 쪽 960픽셀)
+let sent = [], fails = 0, testTimer = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function showErr(text) { $("err").textContent = text; $("err").style.display = text ? "block" : "none"; }
+
+function fakeStream() {  // 노트북에서 카메라 없이 시험할 때(?test=1): 움직이는 그림을 카메라처럼 쓴다
+  const c = document.createElement("canvas");
+  c.width = 540; c.height = 960;
+  const g = c.getContext("2d");
+  const draw = () => {
+    const t = performance.now() / 1000;
+    g.fillStyle = "#1b1d22"; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = "#3987e5"; g.beginPath(); g.arc(270 + 150 * Math.sin(t), 480 + 220 * Math.cos(t * 0.7), 60, 0, 7); g.fill();
+    g.fillStyle = "#f2f1ee"; g.font = "600 34px system-ui"; g.textAlign = "center";
+    g.fillText("시험 페이지 영상", 270, 90);
+    g.fillText(new Date().toLocaleTimeString("ko-KR", { hour12: false }), 270, 880);
+  };
+  draw();
+  testTimer = setInterval(draw, 66);
+  return c.captureStream(15);
+}
+
+async function openCamera() {
+  if (test) return fakeStream();
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("이 주소에서는 카메라를 쓸 수 없어요. 노트북 화면의 QR(https 주소)로 다시 열어 주세요.");
+  }
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
+}
+
+async function keepAwake() {
+  try {
+    if (!("wakeLock" in navigator)) throw new Error("no wake lock");
+    wake = await navigator.wakeLock.request("screen");  // 화면이 꺼지지 않게
+  } catch { /* 막지 못하는 휴대폰은 그대로 둔다 */ }
+}
+
+async function start() {
+  showErr("");
+  try {
+    stream = await openCamera();
+  } catch (e) {
+    showErr(e.name === "NotAllowedError" ? "카메라가 허용되지 않았어요. 주소창의 자물쇠(사이트 설정)에서 카메라를 허용한 뒤 다시 눌러 주세요."
+      : e.name === "NotFoundError" ? "카메라를 찾지 못했어요." : (e.message || String(e)));
+    return;
+  }
+  v.srcObject = stream;
+  v.style.display = "block";
+  try { await v.play(); } catch { /* 자동 재생이 막혀도 아래 반복에서 프레임을 읽는다 */ }
+  $("start").style.display = "none";
+  $("tools").style.display = "flex";
+  $("stat").style.display = "block";
+  running = true;
+  keepAwake();
+  loop(++runId);
+}
+
+function stop() {
+  running = false;
+  clearInterval(testTimer);
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  wake?.release?.().catch(() => {});
+  v.style.display = "none";
+  $("tools").style.display = "none";
+  $("stat").style.display = "none";
+  $("start").style.display = "";
+  $("start").textContent = "카메라 다시 시작";
+}
+
+async function loop(id) {
+  while (running && id === runId) {
+    const t0 = performance.now();
+    const w = v.videoWidth, h = v.videoHeight;
+    if (w && h && document.visibilityState === "visible") {
+      const s = Math.min(1, maxSide / Math.max(w, h));
+      canvas.width = Math.round(w * s);
+      canvas.height = Math.round(h * s);
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", quality));
+      try {
+        const res = await fetch("frame?k=" + encodeURIComponent(key), { method: "POST", body: blob, headers: { "Content-Type": "image/jpeg" } });
+        if (res.status === 403) { showErr("연결 열쇠가 바뀌었어요(노트북 프로그램을 다시 켰어요). 노트북 화면의 QR을 다시 찍어 주세요."); stop(); return; }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        fails = 0;
+        sent.push(performance.now());
+      } catch { fails++; }
+      const now = performance.now();
+      sent = sent.filter((t) => now - t <= 2000);
+      const fps = sent.length / 2;
+      const bad = fails >= 5;
+      $("stat").classList.toggle("bad", bad);
+      $("stat").textContent = bad ? "노트북으로 보내지 못하고 있어요. 같은 와이파이인지, 노트북 프로그램이 켜져 있는지 확인하세요."
+        : `노트북으로 보내는 중 · ${fps.toFixed(0)}장/초`;
+      if (bad) await sleep(800);
+    }
+    await sleep(Math.max(0, 33 - (performance.now() - t0)));  // 초당 30장까지(휴대폰·와이파이가 받쳐 주는 만큼)
+  }
+}
+
+// ---------- 실시간 판정 도면: 노트북 시연 화면과 같은 판정을 1초마다 받아 그린다
+const S = 7.35 / 171, PX = (px) => (px - 92) * S, BOT = 4.8, YT0 = BOT + 2.34, YT1 = YT0 + 5.8, LT = 3.12, LB = -2.0;
+const VIEW = { xmin: PX(600), xmax: PX(1440), ymin: LB - 0.3, ymax: YT1 + 0.3 };
+let CROP = { x0: PX(770), x1: PX(1200), y0: -0.25, y1: YT1 + 0.25 }, K = 740 / (CROP.x1 - CROP.x0), OX = 0, OY = 0;
+const sx = (x) => OX + (x - CROP.x0) * K, sy = (y) => OY + (CROP.y1 - y) * K;
+const fromNorm = (nx, ny) => [VIEW.xmin + nx * (VIEW.xmax - VIEW.xmin), VIEW.ymax - ny * (VIEW.ymax - VIEW.ymin)];
+let ROOMS = [[590, 838, YT0, YT1], [838, 1009, YT0, YT1], [1009, 1255, YT0, YT1], [658, 779, 0, BOT], [779, 838, 0, BOT], [1004, 1124, 0, BOT],
+  [1124, 1184, 0, BOT], [1184, 1246, 0, BOT], [838, 903, LB, LT], [903, 1004, LB, LT]].map(([a, b, y0, y1]) => [PX(a), PX(b), y0, y1]);
+let CORS = [[-100, 100, BOT, YT0]];
+function applySite(site) {  // 장소 정보(site.json)가 오면 그 장소 도면으로 바꾼다
+  if (!site || !site.crop) return;
+  CROP = site.crop; ROOMS = site.rooms || []; CORS = site.corridors || [];
+  const w = CROP.x1 - CROP.x0, h = CROP.y1 - CROP.y0;
+  K = Math.min(740 / w, 540 / h); OX = (740 - w * K) / 2; OY = (540 - h * K) / 2;
+}
+const WORD = { detected: "사람 있음", possible: "확인 중", not_detected: "비어 있음", idle: "대기", no_signal: "신호 없음", warming: "준비 중", uncalibrated: "보정 전" };
+const NS = "http://www.w3.org/2000/svg";
+const sv = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
+let miniKey = "", miniEls = {};
+function drawMini(zones) {
+  const svg = $("mini");
+  svg.innerHTML = "";
+  miniEls = {};
+  for (const [x0, x1, y0, y1] of CORS) sv("rect", { class: "cor", x: sx(x0), y: sy(y1), width: (x1 - x0) * K, height: (y1 - y0) * K }, svg);
+  for (const [x0, x1, y0, y1] of ROOMS) sv("rect", { class: "room", x: sx(x0), y: sy(y1), width: (x1 - x0) * K, height: (y1 - y0) * K, rx: 3 }, svg);
+  for (const z of zones) {
+    let R = z.rect;
+    if (!R) {
+      const pts = (z.polygon || []).map(([nx, ny]) => fromNorm(nx, ny));
+      if (pts.length < 3) continue;
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      R = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    }
+    const [x0, x1, y0, y1] = R;
+    const g = sv("g", { class: "zone" }, svg), cx = sx((x0 + x1) / 2), cy = sy((y0 + y1) / 2), flat = (y1 - y0) * K < 110;
+    sv("rect", { x: sx(x0) + 2, y: sy(y1) + 2, width: (x1 - x0) * K - 4, height: (y1 - y0) * K - 4, rx: 6 }, g);
+    sv("text", { class: "zn", x: flat ? cx - 62 : cx, y: flat ? cy + 11 : cy - 2 }, g, z.name);
+    miniEls[z.id] = { g, st: sv("text", { class: "zs", x: flat ? cx + 62 : cx, y: flat ? cy + 8 : cy + 30 }, g, "") };
+  }
+}
+async function pollLive() {
+  try {
+    const d = await (await fetch("live.json?k=" + encodeURIComponent(key), { cache: "no-store" })).json();
+    $("liveNote").textContent = d.note || "";
+    const zs = d.zones || [];
+    const k = JSON.stringify([d.site || null, zs.map((z) => [z.id, z.name, z.polygon, z.rect])]);
+    if (zs.length && k !== miniKey) { miniKey = k; applySite(d.site); drawMini(zs); }
+    for (const z of zs) { const e = miniEls[z.id]; if (e) { e.g.setAttribute("class", "zone s-" + z.state); e.st.textContent = WORD[z.state] || z.state; } }
+    const names = (st) => zs.filter((z) => z.state === st).map((z) => z.name).sort((a, b) => a.localeCompare(b, "ko"));
+    const det = names("detected"), pos = names("possible");
+    let cls = "", head = d.note || "연결하는 중";
+    if (d.ok && d.active && zs.length) {
+      if (det.length) { cls = "h-detected"; head = det.join("·") + "에 사람이 있어요"; }
+      else if (pos.length) { cls = "h-possible"; head = pos.join("·") + " 확인 중"; }
+      else if (zs.every((z) => z.state === "not_detected")) { cls = "h-empty"; head = "모든 구역이 비어 있어요"; }
+    }
+    $("live").className = cls;
+    $("liveHead").textContent = head;
+  } catch { $("liveNote").textContent = "노트북과 연결이 끊겼어요"; }
+  setTimeout(pollLive, 1000);
+}
+pollLive();
+
+$("start").onclick = start;
+$("stop").onclick = stop;
+$("flip").onclick = async () => {
+  if (test) return;
+  facing = facing === "environment" ? "user" : "environment";
+  stream?.getTracks().forEach((t) => t.stop());
+  try { stream = await openCamera(); v.srcObject = stream; await v.play(); } catch (e) { showErr(e.message || String(e)); }
+};
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && running) keepAwake(); });
+if (test) start();
+</script>
+</body>
+</html>

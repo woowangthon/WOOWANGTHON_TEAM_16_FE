@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>와치메이트 시연 화면</title>
+<!-- 글꼴: Pretendard(인터넷으로 받는다. 못 받으면 시스템 글꼴로 보인다) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root { --bg: #0b0d10; --panel: #12151a; --panel2: #171b21; --ink: #eef0f2; --muted: #8b93a1; --faint: #4b5260; --line: rgba(255,255,255,.10);
+  --accent: #4c9dff; --hot: #ff6b4a; --warm: #f5b83d; --calm: #2dd4a7; --danger: #e34948; --ok: #1baf7a; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); overflow: hidden;
+  font: 14px/1.5 "Pretendard Variable", Pretendard, system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+body { display: flex; flex-direction: column; }
+button, select, input, svg text { font-family: inherit; }
+#caps { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #000; flex: none; }
+#caps > div { background: var(--panel); padding: 5px 14px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+#caps b { color: var(--ink); font-weight: 600; }
+#clock { font-variant-numeric: tabular-nums; }
+#stage { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #000; }
+.pane { position: relative; overflow: hidden; min-width: 0; }
+#left { background: var(--bg); }
+#right { background: #08080a; }
+#site { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #fff; display: none; }
+#cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; }
+#siteDown { background: #f4f4f2; color: #0b0b0b; display: none; text-align: center; }
+#connect { background: rgba(8,8,10,.94); display: none; }
+.card { max-width: 520px; width: 100%; }
+.card h2 { margin: 0 0 10px; font-size: 18px; }
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; }
+ol.steps li { counter-increment: s; position: relative; padding: 0 0 12px 34px; color: var(--muted); }
+ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+ol.steps b { color: var(--ink); font-weight: 600; }
+.qrrow { display: flex; gap: 14px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+#qr { background: #fff; border-radius: 8px; padding: 6px; line-height: 0; }
+#qr svg { width: 170px; height: 170px; }
+.url { font: 13px/1.4 ui-monospace, Consolas, monospace; color: var(--ink); word-break: break-all; user-select: all; }
+#stale { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: none; padding: 4px 12px; border-radius: 999px;
+  background: rgba(227,73,72,.92); color: #fff; font-size: 13px; }
+
+/* ---------- 왼쪽 시연 화면(고정 크기로 그린 뒤 칸에 맞게 줄인다) */
+#demo { position: absolute; left: 50%; top: 50%; width: 800px; height: 912px; transform-origin: 50% 50%; display: flex; flex-direction: column; gap: 12px; padding: 16px 22px 10px; }
+.dhead { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(145deg, #2b6fe0, #4c9dff); display: flex; align-items: center; justify-content: center; }
+.brand h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; }
+.brand p { margin: 0; color: var(--muted); font-size: 13px; }
+.pill { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--line); font-size: 13.5px; white-space: nowrap; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+.pill.live .dot { background: var(--calm); animation: blink 1.6s ease-in-out infinite; }
+.pill.replay .dot { background: var(--warm); }
+.pill.off .dot { background: var(--danger); }
+@keyframes blink { 50% { opacity: .35; } }
+#hero { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line);
+  transition: background .6s, border-color .6s; }
+#hero .ico { flex: none; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #222730; color: var(--muted); transition: background .6s, color .6s; }
+#hero h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
+#hero p { margin: 2px 0 0; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+#hero.h-detected { background: linear-gradient(90deg, rgba(255,107,74,.22), rgba(255,107,74,.05)); border-color: rgba(255,107,74,.6); }
+#hero.h-detected .ico { background: var(--hot); color: #fff; animation: beat 1.4s ease-in-out infinite; }
+#hero.h-possible { background: linear-gradient(90deg, rgba(245,184,61,.16), rgba(245,184,61,.03)); border-color: rgba(245,184,61,.5); }
+#hero.h-possible .ico { background: rgba(245,184,61,.25); color: var(--warm); }
+#hero.h-empty .ico { background: rgba(45,212,167,.16); color: var(--calm); }
+@keyframes beat { 50% { transform: scale(1.08); } }
+.planwrap { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 10px; }
+#plan { display: block; width: 100%; height: auto; }
+#plan3d { position: relative; width: 736px; height: 537px; display: none; overflow: hidden; border-radius: 12px;
+  background: radial-gradient(120% 90% at 50% 20%, #1a2029 0%, #0d1014 70%); }
+#plan3d canvas { display: block; }
+.l3 { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); text-align: center; pointer-events: none; white-space: nowrap; will-change: transform; }
+.l3 b { display: block; font-size: 21px; font-weight: 800; letter-spacing: -.01em; text-shadow: 0 2px 10px rgba(0,0,0,.8); }
+.l3 span { display: inline-block; margin-top: 3px; padding: 2px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(34,39,48,.9); color: var(--muted); transition: background .5s, color .5s; }
+.l3.s-not_detected span { background: rgba(45,212,167,.2); color: var(--calm); }
+.l3.s-possible span { background: rgba(245,184,61,.25); color: var(--warm); }
+.l3.s-detected span { background: var(--hot); color: #fff; }
+.l3.small b { font-size: 12px; font-weight: 600; color: #9aa3b2; }
+#truth { position: absolute; right: 18px; top: 16px; padding: 6px 16px; border-radius: 999px; background: rgba(10,12,15,.86);
+  border: 1px solid rgba(255,255,255,.18); font-size: 14.5px; white-space: nowrap; display: none; }
+#truth span { color: var(--muted); margin-right: 8px; }
+#events { position: absolute; right: 18px; top: 64px; width: 216px; display: flex; flex-direction: column; gap: 6px; }
+#events .t { color: var(--faint); font-size: 12px; margin-bottom: 2px; }
+.ev { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: rgba(10,12,15,.8); border: 1px solid var(--line); font-size: 13px;
+  animation: slide .5s ease-out; }
+.ev i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--calm); }
+.ev.detected i { background: var(--hot); } .ev.possible i { background: var(--warm); }
+.ev time { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; font-size: 12px; }
+.ev:nth-child(n+4) { opacity: .6; } .ev:nth-child(n+6) { opacity: .35; }
+@keyframes slide { from { opacity: 0; transform: translateX(16px); } }
+#prog { position: absolute; left: 18px; right: 18px; bottom: 7px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.07); display: none; }
+#prog i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--warm); }
+.room { fill: #171b22; stroke: #2e3541; stroke-width: 1.3; }
+.cor { fill: #101318; }
+.rname { fill: #4a5362; font-size: 12px; text-anchor: middle; }
+.zone rect { fill: rgba(255,255,255,.03); stroke: #3a4250; stroke-width: 2; transition: fill .6s, stroke .6s; }
+.zone .zname { fill: var(--ink); font-size: 23px; font-weight: 700; text-anchor: middle; }
+.zone .zstate { fill: var(--muted); font-size: 15px; font-weight: 600; text-anchor: middle; transition: fill .6s; }
+.zone .who { opacity: 0; transition: opacity .6s; fill: #fff; }
+.zone.s-not_detected rect { fill: rgba(45,212,167,.07); stroke: rgba(45,212,167,.55); }
+.zone.s-not_detected .zstate { fill: var(--calm); }
+.zone.s-possible rect { fill: rgba(245,184,61,.16); stroke: var(--warm); }
+.zone.s-possible .zstate { fill: var(--warm); }
+.zone.s-detected rect { fill: rgba(255,107,74,.26); stroke: var(--hot); stroke-width: 3; }
+.zone.s-detected .zstate { fill: #ff9a84; }
+.zone.s-detected .who { opacity: 1; }
+.pulse { fill: none; stroke: var(--hot); stroke-width: 2.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.zone.s-detected .pulse { animation: pulse 2s ease-out infinite; }
+.zone.s-detected .pulse.p2 { animation-delay: 1s; }
+@keyframes pulse { 0% { transform: scale(.25); opacity: .75; } 100% { transform: scale(1.5); opacity: 0; } }
+.link { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; opacity: .55; animation: flow 1.2s linear infinite; transition: stroke .6s; }
+.link.s-possible { stroke: var(--warm); opacity: .8; }
+.link.s-detected { stroke: var(--hot); opacity: .95; stroke-width: 2.6; }
+@keyframes flow { to { stroke-dashoffset: -24; } }
+.node circle { fill: #0b0d10; stroke: #cfd6e0; stroke-width: 2; }
+.node.tx circle.core { fill: var(--accent); stroke: #fff; }
+.node.tx circle.ring { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; animation: ring 2.4s ease-out infinite; }
+@keyframes ring { 0% { transform: scale(.4); opacity: .7; } 100% { transform: scale(1.9); opacity: 0; } }
+.node text { fill: #9aa3b2; font-size: 11.5px; text-anchor: middle; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.zc { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 11px 14px 9px; transition: border-color .6s, box-shadow .6s; }
+.zc.s-detected { border-color: rgba(255,107,74,.75); box-shadow: 0 0 0 1px rgba(255,107,74,.35) inset; }
+.zc.s-possible { border-color: rgba(245,184,61,.6); }
+.zc .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zc .name { font-size: 18px; font-weight: 700; }
+.chip { padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: #222730; color: var(--muted); white-space: nowrap; }
+.s-not_detected .chip { background: rgba(45,212,167,.14); color: var(--calm); }
+.s-possible .chip { background: rgba(245,184,61,.18); color: var(--warm); }
+.s-detected .chip { background: var(--hot); color: #fff; }
+.zc .mid { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+.zc .val { font-size: 24px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.meter { position: relative; height: 6px; border-radius: 3px; background: #222730; margin-top: 5px; overflow: hidden; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: var(--calm); transition: width .8s, background .6s; }
+.s-possible .meter i { background: var(--warm); }
+.s-detected .meter i { background: var(--hot); }
+.zc canvas { display: block; width: 100%; height: 38px; margin-top: 7px; }
+.dfoot { color: var(--faint); font-size: 12px; text-align: center; margin-top: -2px; }
+
+/* ---------- 아래 조작 줄 */
+#bar { flex: none; background: var(--panel); border-top: 1px solid var(--line); padding: 8px 14px; display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 16px; }
+.step { display: flex; gap: 9px; align-items: flex-start; min-width: 0; }
+.num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: #2a2b30; color: var(--ink); font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; margin-top: 4px; }
+.step.done .num { background: var(--ok); color: #fff; }
+.body { min-width: 0; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.state { font-size: 13px; }
+button, select, input[type=text] { font-size: 13px; color: var(--ink); background: #222327; border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
+button { cursor: pointer; }
+button:hover { background: #2b2c31; }
+button.primary { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+button.primary.on { background: #222327; border-color: var(--danger); color: #ff8f8e; }
+button.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+input[type=text] { width: 150px; }
+label { color: var(--muted); font-size: 13px; }
+body.clean #bar { display: none; }
+body.nocaps #caps { display: none; }
+@media (max-width: 1100px) { #bar { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div id="caps">
+  <div><b>실시간 판정 화면</b><span>와치메이트</span></div>
+  <div><b>현장 카메라 <span style="font-weight:400;color:var(--muted)">· 휴대폰</span></b><span id="clock"></span></div>
+</div>
+
+<div id="stage">
+  <div class="pane" id="left">
+    <div id="demo">
+      <div class="dhead">
+        <div class="brand">
+          <div class="logo"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 9.5a14 14 0 0 1 19 0"/><path d="M6 13a9 9 0 0 1 12 0"/><path d="M9.3 16.4a4.2 4.2 0 0 1 5.4 0"/><circle cx="12" cy="19.6" r="1" fill="#fff"/></svg></div>
+          <div><h1>와치메이트</h1><p>Wi-Fi 신호만으로, 어느 방에 사람이 있는지 실시간으로</p></div>
+        </div>
+        <div class="pill" id="pill"><span class="dot"></span><span id="pillText">연결하는 중</span></div>
+      </div>
+      <div id="hero">
+        <div class="ico" id="heroIco"></div>
+        <div><h2 id="heroText">연결하는 중</h2><p id="heroSub"></p></div>
+      </div>
+      <div class="planwrap">
+        <svg id="plan" viewBox="0 0 740 540" role="img" aria-label="S4-1동 2층 평면도와 구역별 상태"></svg>
+        <div id="plan3d" role="img" aria-label="S4-1동 2층 입체 평면도와 구역별 상태"></div>
+        <div id="truth"><span>실제 상황</span><b id="truthText"></b></div>
+        <div id="events"></div>
+        <div id="prog"><i></i></div>
+      </div>
+      <div class="cards" id="cards"></div>
+      <div class="dfoot" id="dfoot">빈 방일 때의 Wi-Fi 신호와 비교해 2초마다 판단합니다 · 카메라·착용 기기 없이 · S4-1동 2층</div>
+    </div>
+    <iframe id="site" title="실시간 사이트"></iframe>
+    <div class="overlay" id="siteDown">
+      <div>
+        <h2 style="margin:0 0 6px;font-size:18px">왼쪽에 띄울 사이트가 꺼져 있어요</h2>
+        <div id="siteDownUrl" style="color:#52514e"></div>
+        <div style="color:#52514e;margin:6px 0 12px">화면 서버와 판정 서버를 켠 뒤 '다시 열기'를 누르세요.</div>
+        <button id="siteRetry" style="color:#0b0b0b;background:#fff;border-color:#c3c2b7">다시 열기</button>
+      </div>
+    </div>
+  </div>
+  <div class="pane" id="right">
+    <img id="cam" alt="휴대폰 카메라 영상">
+    <div id="stale"></div>
+    <div class="overlay" id="connect">
+      <div class="card">
+        <h2>휴대폰 카메라 연결</h2>
+        <ol class="steps">
+          <li><b>휴대폰과 노트북을 같은 와이파이에 연결해요.</b><br>학교 와이파이에서 안 되면 휴대폰 핫스팟을 켜고 노트북을 거기에 붙이세요. 와이파이를 바꾸면 아래 QR도 저절로 바뀌어요.</li>
+          <li><b>휴대폰 카메라로 아래 QR을 찍어요.</b>
+            <div class="qrrow"><div id="qr"></div><div style="flex:1;min-width:180px"><div style="font-size:12px">QR이 안 되면 휴대폰 브라우저에 직접 입력</div><div class="url" id="camUrl"></div><select id="camSel" style="display:none;margin-top:6px"></select></div></div>
+          </li>
+          <li><b>'안전하지 않음' 경고가 나오면 넘어가요.</b><br>안드로이드: 고급 → 계속 · 아이폰: 세부사항 보기 → 이 웹사이트 방문. 우리 노트북으로만 연결되는 주소라 괜찮아요.</li>
+          <li><b>'카메라 시작'을 누르고 카메라를 허용해요.</b><br>허용하면 이 자리에 휴대폰 영상이 떠요. 휴대폰 화면에는 실시간 판정 도면도 같이 나와요.</li>
+        </ol>
+        <div class="row" style="margin-top:4px"><button id="connectClose">닫기</button><span class="hint">닫아도 아래 1번 '연결 방법 보기'로 다시 볼 수 있어요.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="bar">
+  <div class="step" id="st1">
+    <div class="num">1</div>
+    <div class="body">
+      <div class="row"><b>휴대폰 연결</b><button id="showConnect">연결 방법 보기</button></div>
+      <div class="state" id="camState">휴대폰을 기다리는 중</div>
+      <div class="hint">연결되면 오른쪽에 영상이 뜨고 이 줄이 초록색으로 바뀌어요.</div>
+    </div>
+  </div>
+  <div class="step" id="st2">
+    <div class="num">2</div>
+    <div class="body">
+      <div class="row"><b>화면 고르기</b>
+        <select id="leftMode" title="왼쪽 화면"><option value="demo">시연 화면</option><option value="site">사이트 그대로</option></select>
+        <select id="dataMode" title="판정 데이터"><option value="live">실시간</option><option value="replay">기록 재생(예시)</option></select>
+        <select id="view" title="평면도 모양"><option value="3d">평면도 3D</option><option value="2d">평면도 2D</option></select>
+        <select id="words" title="표현"><option value="who">사람 있음·비어 있음</option><option value="change">변화 큼·없음</option></select>
+        <select id="fit" title="카메라 맞춤"><option value="contain">카메라 전체</option><option value="cover">카메라 꽉 차게</option></select>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <label><input type="checkbox" id="capsOn" checked> 위 이름표</label>
+        <label><input type="checkbox" id="truthOn" checked> 실제 상황</label>
+        <label><input type="checkbox" id="eventsOn" checked> 변화 기록</label>
+        <label><input type="checkbox" id="swayOn" checked> 3D 시점 움직임</label>
+        <span id="siteOpts" style="display:none"><select id="siteW"><option>1024</option><option>1152</option><option selected>1280</option><option>1440</option><option>1600</option></select>
+        <input type="text" id="siteUrl"> <button id="siteGo">적용</button></span>
+      </div>
+      <div class="hint" id="dataHint">'실시간'은 CSI가 들어오는 대로 구역 상태가 바뀌어요. '기록 재생'은 지난 측정을 빠르게 보여 주는 예시예요.</div>
+    </div>
+  </div>
+  <div class="step" id="st3">
+    <div class="num">3</div>
+    <div class="body">
+      <div class="row"><b>녹화 (60프레임)</b><button class="primary" id="rec">● 녹화 시작</button><button id="hide">이 줄 숨기기 (H)</button></div>
+      <div class="state" id="recState"></div>
+      <div class="hint">누르면 '이 탭 공유'를 물어요. 허용하면 이 줄이 숨겨지고 녹화가 시작돼요. 끝낼 때는 화면 맨 위 '공유 중지'를 누르면 영상이 다운로드 폴더에 저장돼요. F11 전체 화면을 권해요.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const saved = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const keep = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 저장 못 해도 동작한다 */ } };
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; if (parent) parent.appendChild(e); return e; };
+const p2 = (n) => String(n).padStart(2, "0");
+const hms = (t) => { const d = new Date(t * 1000); return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; };
+let info = { site: "http://localhost:5173", cam_urls: [] };
+let seen = false, connectOpen = false, connectClosedByUser = false, lastUrls = "";
+
+// ---------- 평면도(watchmate-fe/src/lib/layout.ts와 같은 치수, 미터)
+const S = 7.35 / 171, PX = (px) => (px - 92) * S;
+const BOT = 4.8, COR = 2.34, TOPD = 5.8, YT0 = BOT + COR, YT1 = YT0 + TOPD, LOBBY_TOP = 3.12, LOBBY_BOT = -2.0;
+const VIEW = { xmin: PX(600), xmax: PX(1440), ymin: LOBBY_BOT - 0.3, ymax: YT1 + 0.3 };
+let CROP = { x0: PX(770), x1: PX(1200), y0: -0.25, y1: YT1 + 0.25 }, K = 740 / (CROP.x1 - CROP.x0), OX = 0, OY = 0;
+const sx = (x) => OX + (x - CROP.x0) * K, sy = (y) => OY + (CROP.y1 - y) * K;
+const fromNorm = (nx, ny) => [VIEW.xmin + nx * (VIEW.xmax - VIEW.xmin), VIEW.ymax - ny * (VIEW.ymax - VIEW.ymin)];
+let ROOMS = [
+  ...[[590, 838, "204"], [838, 1009, "223"], [1009, 1255, "205"]].map(([a, b, n]) => [PX(a), PX(b), YT0, YT1, n]),
+  ...[[658, 779, "217"], [779, 838, "화장실"], [1004, 1124, "224"], [1124, 1184, "216"], [1184, 1246, "215"]].map(([a, b, n]) => [PX(a), PX(b), 0, BOT, n]),
+  [PX(838), PX(903), LOBBY_BOT, LOBBY_TOP, "화장실"], [PX(903), PX(1004), LOBBY_BOT, LOBBY_TOP, "계단"],
+];
+let CORRIDORS = [[PX(116), PX(1765), BOT, YT0], [PX(838), PX(1004), LOBBY_TOP, BOT]];
+// 장소 정보(site.json)가 오면 도면 치수를 그 장소로 바꾼다. 없으면 위의 2층 치수를 그대로 쓴다.
+function applySite(site) {
+  if (!site || !site.crop) return;
+  CROP = site.crop; ROOMS = site.rooms || []; CORRIDORS = site.corridors || [];
+  const w = CROP.x1 - CROP.x0, h = CROP.y1 - CROP.y0;
+  K = Math.min(740 / w, 540 / h); OX = (740 - w * K) / 2; OY = (540 - h * K) / 2;
+  if (site.label) {
+    $("dfoot").textContent = $("dfoot").textContent.replace(/S4-1동 \d층/, site.label);
+    $("plan").setAttribute("aria-label", site.label + " 평면도와 구역별 상태");
+    $("plan3d").setAttribute("aria-label", site.label + " 입체 평면도와 구역별 상태");
+  }
+}
+const zoneRect = (z) => {  // 구역 네모 [x0, x1, y0, y1](미터)
+  if (z.rect) return z.rect;
+  const pts = (z.polygon || []).map(([nx, ny]) => fromNorm(nx, ny));
+  if (pts.length < 3) return null;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+};
+const hasXY = (n) => n.mx != null || n.x != null;
+const nodeXY = (n) => (n.mx != null ? [n.mx, n.my] : fromNorm(n.x, n.y));
+const WORDS = {
+  who: { detected: "사람 있음", possible: "확인 중", not_detected: "비어 있음", meter: "감지 신호" },
+  change: { detected: "변화 큼", possible: "변화 가능", not_detected: "변화 없음", meter: "신호 변화" },
+};
+const OTHER = { idle: "대기", no_signal: "신호 없음", warming: "준비 중", uncalibrated: "보정 전", no_sensor: "보드 없음" };
+const word = (state) => (WORDS[$("words").value] || WORDS.who)[state] || OTHER[state] || state;
+const ICON = {
+  person: '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6.2" r="3.4"/><path d="M5.5 20.5c0-4.2 2.9-7.3 6.5-7.3s6.5 3.1 6.5 7.3c0 .6-.4 1-1 1h-11c-.6 0-1-.4-1-1z"/></svg>',
+  check: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  wait: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+};
+const zoneEls = {}, cardEls = {}, linkEls = {}, hist = {}, prevState = {};
+let geoKey = "", lastT = 0, events = [], lastLive = null;
+
+function buildPlan(zones, nodes) {
+  const svg = $("plan");
+  svg.innerHTML = "";
+  for (const [x0, x1, y0, y1] of CORRIDORS) el("rect", { class: "cor", x: sx(x0), y: sy(y1), width: (x1 - x0) * K, height: (y1 - y0) * K }, svg);
+  const zoneNames = new Set(zones.map((z) => z.name.replace("호", "")));
+  for (const [x0, x1, y0, y1, name] of ROOMS) {
+    el("rect", { class: "room", x: sx(x0), y: sy(y1), width: (x1 - x0) * K, height: (y1 - y0) * K, rx: 3 }, svg);
+    if (!zoneNames.has(name)) el("text", { class: "rname", x: sx((x0 + x1) / 2), y: sy((y0 + y1) / 2) + 4 }, svg, name);
+  }
+  const tx = nodes.find((n) => n.role === "tx" && hasXY(n));
+  const gLinks = el("g", {}, svg), gZones = el("g", {}, svg), gNodes = el("g", {}, svg);
+  for (const z of zones) {
+    const R = zoneRect(z);
+    if (!R) continue;
+    const [x0, x1, y0, y1] = R;
+    const g = el("g", { class: "zone" }, gZones);
+    const cx = sx((x0 + x1) / 2), cy = sy((y0 + y1) / 2), w = (x1 - x0) * K, h = (y1 - y0) * K;
+    el("rect", { x: sx(x0) + 2, y: sy(y1) + 2, width: w - 4, height: h - 4, rx: 6 }, g);
+    const r = Math.min(w, h) * 0.42;
+    el("circle", { class: "pulse", cx, cy, r }, g);
+    el("circle", { class: "pulse p2", cx, cy, r }, g);
+    const flat = h < 110;
+    const who = el("g", { class: "who", transform: flat ? `translate(${cx - 118}, ${cy - 17}) scale(1.4)` : `translate(${cx - 21}, ${cy - 74}) scale(1.75)` }, g);
+    el("circle", { cx: 12, cy: 6.2, r: 3.4 }, who);
+    el("path", { d: "M5.5 20.5c0-4.2 2.9-7.3 6.5-7.3s6.5 3.1 6.5 7.3c0 .6-.4 1-1 1h-11c-.6 0-1-.4-1-1z" }, who);
+    el("text", { class: "zname", x: flat ? cx - 44 : cx, y: flat ? cy + 8 : cy - 2 }, g, z.name);
+    const st = el("text", { class: "zstate", x: flat ? cx + 48 : cx, y: flat ? cy + 6 : cy + 24 }, g, "");
+    zoneEls[z.id] = { g, st };
+    const rx = nodes.find((n) => n.role === "rx" && n.zone_id === z.id && hasXY(n));
+    if (tx && rx) {
+      const [ax, ay] = nodeXY(tx), [bx, by] = nodeXY(rx);
+      linkEls[z.id] = el("line", { class: "link", x1: sx(ax), y1: sy(ay), x2: sx(bx), y2: sy(by) }, gLinks);
+    }
+  }
+  for (const n of nodes) {
+    if (!hasXY(n)) continue;
+    const [mx, my] = nodeXY(n), g = el("g", { class: "node " + n.role }, gNodes);
+    if (n.role === "tx") {
+      el("circle", { class: "ring", cx: sx(mx), cy: sy(my), r: 16 }, g);
+      el("circle", { class: "core", cx: sx(mx), cy: sy(my), r: 6.5 }, g);
+      el("text", { x: sx(mx) + 28, y: sy(my) - 9 }, g, "송신");
+    } else {
+      el("circle", { cx: sx(mx), cy: sy(my), r: 5 }, g);
+    }
+  }
+  const cards = $("cards");
+  cards.innerHTML = "";
+  for (const z of [...zones].sort((a, b) => a.name.localeCompare(b.name, "ko"))) {
+    const c = document.createElement("div");
+    c.className = "zc";
+    c.innerHTML = `<div class="top"><span class="name"></span><span class="chip"></span></div>
+      <div class="mid"><span class="mlabel"></span><span><span class="since"></span> <span class="val">–</span></span></div>
+      <div class="meter"><i></i></div><canvas width="480" height="76"></canvas>`;
+    c.querySelector(".name").textContent = z.name;
+    cards.appendChild(c);
+    cardEls[z.id] = c;
+    hist[z.id] = [];
+  }
+}
+
+const dur = (s) => (s < 60 ? `${Math.floor(s)}초째` : `${Math.floor(s / 60)}분 ${Math.floor(s % 60)}초째`);
+function spark(canvas, pts, win, tNow, state) {
+  const g = canvas.getContext("2d"), W = canvas.width, H = canvas.height, pad = 6;
+  g.clearRect(0, 0, W, H);
+  const y = (p) => pad + (1 - p) * (H - 2 * pad), x = (t) => W - ((tNow - t) / win) * W;
+  g.setLineDash([4, 6]); g.lineWidth = 1; g.strokeStyle = "rgba(255,255,255,.14)";
+  for (const th of [0.5, 0.2]) { g.beginPath(); g.moveTo(0, y(th)); g.lineTo(W, y(th)); g.stroke(); }
+  g.setLineDash([]);
+  if (pts.length < 2) return;
+  const col = state === "detected" ? "#ff6b4a" : state === "possible" ? "#f5b83d" : "#2dd4a7";
+  g.beginPath();
+  pts.forEach((p, i) => (i ? g.lineTo(x(p.t), y(p.p)) : g.moveTo(x(p.t), y(p.p))));
+  g.lineWidth = 3; g.strokeStyle = col; g.lineJoin = "round"; g.stroke();
+  g.lineTo(x(pts[pts.length - 1].t), H); g.lineTo(x(pts[0].t), H); g.closePath();
+  g.globalAlpha = 0.13; g.fillStyle = col; g.fill(); g.globalAlpha = 1;
+  const last = pts[pts.length - 1];
+  g.beginPath(); g.arc(Math.min(W - 5, x(last.t)), y(last.p), 5, 0, 7); g.fillStyle = col; g.fill();
+}
+
+function renderHero(d) {
+  const hero = $("hero"), who = $("words").value === "who";
+  const zs = d.zones || [], names = (st) => zs.filter((z) => z.state === st).map((z) => z.name).sort((a, b) => a.localeCompare(b, "ko"));
+  const det = names("detected"), pos = names("possible");
+  let cls = "", icon = ICON.wait, text = d.note || "연결하는 중", sub = "";
+  if (d.ok && d.active && zs.length) {
+    const oldest = (st) => Math.min(...zs.filter((z) => z.state === st && z.since).map((z) => z.since));
+    if (det.length) {
+      cls = "h-detected"; icon = ICON.person;
+      text = who ? `${det.join("·")}에 사람이 있어요` : `${det.join("·")} 신호 변화 큼`;
+      const t0 = oldest("detected");
+      sub = Number.isFinite(t0) ? `${hms(t0)}부터 · ${dur(Math.max(0, d.t - t0))}` : "";
+    } else if (pos.length) {
+      cls = "h-possible"; icon = ICON.wait;
+      text = who ? `${pos.join("·")} 확인 중` : `${pos.join("·")} 변화 가능`;
+      sub = "신호가 조금 달라졌어요. 계속 지켜보는 중";
+    } else if (zs.every((z) => z.state === "not_detected")) {
+      cls = "h-empty"; icon = ICON.check;
+      text = who ? "모든 구역이 비어 있어요" : "모든 구역 변화 없음";
+      sub = events.length ? `마지막 변화 ${hms(events[0].t)}` : "빈 방 기준과 같아요";
+    }
+  } else if (d.ok === false) { sub = "판정 서버와 수집기를 켜면 여기에 바로 보여요"; }
+  else if (d.ok) { sub = "보정과 감지를 시작하면 바로 움직여요"; }
+  hero.className = cls;
+  if ($("heroIco").dataset.k !== icon) { $("heroIco").innerHTML = icon; $("heroIco").dataset.k = icon; }
+  $("heroText").textContent = text;
+  $("heroSub").textContent = sub;
+}
+function renderEvents() {
+  const box = $("events");
+  box.style.display = $("eventsOn").checked && events.length ? "flex" : "none";
+  const key = events.map((e) => e.t + e.zone + e.state).join("|") + $("words").value;
+  if (box.dataset.k === key) return;
+  box.dataset.k = key;
+  box.innerHTML = '<div class="t">변화 기록</div>' + events.slice(0, 6).map((e) =>
+    `<div class="ev ${e.state}"><i></i><span><b>${e.zone}</b> ${word(e.state)}</span><time>${hms(e.t)}</time></div>`).join("");
+}
+
+function renderLive(d) {
+  lastLive = d;
+  const pill = $("pill");
+  pill.className = "pill " + (!d.ok ? "off" : d.mode === "replay" ? "replay" : d.active ? "live" : "");
+  $("pillText").textContent = d.note || "";
+  $("prog").style.display = d.mode === "replay" ? "block" : "none";
+  if (d.mode === "replay") $("prog").firstElementChild.style.width = (100 * (d.progress || 0)).toFixed(1) + "%";
+  const showTruth = !!d.truth && $("truthOn").checked;
+  $("truth").style.display = showTruth ? "block" : "none";
+  if (showTruth) $("truthText").textContent = d.truth;
+  if (d.zones) {
+    const key = JSON.stringify([d.site || null, d.zones.map((z) => [z.id, z.name, z.polygon, z.rect]), (d.nodes || []).map((n) => [n.name, n.x, n.y, n.mx, n.my])]);
+    if (key !== geoKey) { geoKey = key; applySite(d.site); buildPlan(d.zones, d.nodes || []); if (window.demo3d) window.demo3d.build(d.zones, d.nodes || []); }
+    if (window.demo3d) window.demo3d.update(d.zones, word);
+    if (d.t < lastT - 5) { for (const k in hist) hist[k] = []; events = []; for (const k in prevState) delete prevState[k]; }  // 재생이 처음으로 돌아갔다
+    lastT = d.t;
+    const win = d.mode === "replay" ? 600 : 180;
+    for (const z of d.zones) {
+      const ze = zoneEls[z.id], c = cardEls[z.id];
+      if (!ze || !c) continue;
+      const judged = ["detected", "possible", "not_detected"].includes(z.state);
+      // 변화 기록에는 '있음'과 '비어 있음'으로 확정된 순간만 남긴다('확인 중'을 오가는 것은 적지 않는다)
+      if (z.state === "detected" || z.state === "not_detected") {
+        if (prevState[z.id] && prevState[z.id] !== z.state) events.unshift({ t: z.since || d.t, zone: z.name, state: z.state });
+        prevState[z.id] = z.state;
+      }
+      ze.g.setAttribute("class", "zone s-" + z.state);
+      ze.st.textContent = word(z.state);
+      if (linkEls[z.id]) linkEls[z.id].setAttribute("class", "link s-" + z.state);
+      c.className = "zc s-" + z.state;
+      c.querySelector(".chip").textContent = word(z.state);
+      c.querySelector(".mlabel").textContent = (WORDS[$("words").value] || WORDS.who).meter;
+      const has = typeof z.p === "number";
+      c.querySelector(".val").textContent = has ? Math.round(z.p * 100) + "%" : "–";
+      c.querySelector(".meter i").style.width = has ? Math.max(2, z.p * 100) + "%" : "0";
+      c.querySelector(".since").textContent = z.since && judged ? dur(Math.max(0, d.t - z.since)) : "";
+      if (has) { const h = hist[z.id]; if (!h.length || d.t - h[h.length - 1].t >= 0.9) h.push({ t: d.t, p: z.p }); hist[z.id] = h.filter((p) => d.t - p.t <= win); }
+      spark(c.querySelector("canvas"), hist[z.id], win, d.t, z.state);
+    }
+    events = events.slice(0, 12);
+  }
+  renderHero(d);
+  renderEvents();
+}
+async function pollLive() {
+  try { renderLive(await (await fetch("/live", { cache: "no-store" })).json()); }
+  catch { $("pill").className = "pill off"; $("pillText").textContent = "분할 화면 서버가 꺼졌어요"; }
+  setTimeout(pollLive, 250);
+}
+async function setData(mode) {
+  $("dataHint").textContent = mode === "replay" ? "지난 측정 기록을 읽는 중…" : "'실시간'은 CSI가 들어오는 대로 구역 상태가 바뀌어요.";
+  try {
+    const r = await (await fetch(`/mode?m=${mode}&speed=8`, { cache: "no-store" })).json();
+    if (!r.ok) { $("dataHint").textContent = r.note || "바꾸지 못했어요"; $("dataMode").value = "live"; return; }
+    for (const k in hist) hist[k] = [];
+    events = []; for (const k in prevState) delete prevState[k];
+    $("dataHint").textContent = mode === "replay" ? "지난 측정을 8배속으로 다시 보여 주는 예시예요. 실제 촬영 때는 '실시간'으로 두세요."
+      : "'실시간'은 CSI가 들어오는 대로 구역 상태가 바뀌어요. '기록 재생'은 지난 측정을 빠르게 보여 주는 예시예요.";
+  } catch { $("dataHint").textContent = "분할 화면 서버가 꺼졌어요"; }
+}
+$("dataMode").onchange = () => setData($("dataMode").value);
+$("truthOn").onchange = () => keep("demo.truth", $("truthOn").checked ? "1" : "0");
+$("eventsOn").onchange = () => { keep("demo.events", $("eventsOn").checked ? "1" : "0"); renderEvents(); };
+$("swayOn").onchange = () => keep("demo.sway", $("swayOn").checked ? "1" : "0");
+$("words").onchange = () => { keep("demo.words", $("words").value); if (lastLive) renderLive(lastLive); };
+function applyView() {  // 3D 도구(three.js)를 못 받았으면 2D로 보여 준다
+  const use3d = $("view").value === "3d" && !!window.demo3d;
+  $("plan").style.display = use3d ? "none" : "block";
+  $("plan3d").style.display = use3d ? "block" : "none";
+  if (window.demo3d) window.demo3d.active = use3d;
+}
+$("view").onchange = () => { keep("demo.view", $("view").value); applyView(); };
+
+// ---------- 왼쪽 칸 크기 맞추기
+function layoutLeft() {
+  const box = $("left").getBoundingClientRect();
+  const demo = $("leftMode").value === "demo";
+  $("demo").style.display = demo ? "flex" : "none";
+  $("site").style.display = demo ? "none" : "block";
+  $("siteOpts").style.display = demo ? "none" : "";
+  if (demo) {
+    const s = Math.min(box.width / 800, box.height / 912);
+    $("demo").style.transform = `translate(-50%, -50%) scale(${s})`;
+    $("siteDown").style.display = "none";
+  } else {
+    const w = +$("siteW").value, s = box.width / w, f = $("site");
+    f.style.width = w + "px";
+    f.style.height = Math.ceil(box.height / s) + "px";
+    f.style.transform = `scale(${s})`;
+  }
+}
+async function openSite(url) {
+  $("siteUrl").value = url;
+  if ($("leftMode").value !== "site") return;
+  let up = true;
+  try { await fetch(url, { mode: "no-cors", cache: "no-store" }); } catch { up = false; }
+  $("siteDown").style.display = up ? "none" : "flex";
+  $("siteDownUrl").textContent = url;
+  if (up && $("site").dataset.url !== url) { $("site").src = url; $("site").dataset.url = url; }
+  layoutLeft();
+}
+$("leftMode").onchange = () => { keep("demo.left", $("leftMode").value); layoutLeft(); openSite($("siteUrl").value.trim() || info.site); };
+$("siteGo").onclick = () => { const u = $("siteUrl").value.trim(); if (u) { keep("demo.site", u); $("site").dataset.url = ""; openSite(u); } };
+$("siteRetry").onclick = () => openSite($("siteUrl").value.trim());
+$("siteW").onchange = () => { keep("demo.siteW", $("siteW").value); layoutLeft(); };
+$("fit").onchange = () => { keep("demo.fit", $("fit").value); $("cam").style.objectFit = $("fit").value; };
+$("capsOn").onchange = () => { keep("demo.caps", $("capsOn").checked ? "1" : "0"); document.body.classList.toggle("nocaps", !$("capsOn").checked); layoutLeft(); };
+addEventListener("resize", layoutLeft);
+
+// ---------- 오른쪽: 휴대폰 영상(사진을 이어 붙인 흐름)
+function startStream() {
+  const img = $("cam");
+  img.onerror = () => setTimeout(startStream, 2000);  // 서버를 다시 켜면 다시 붙는다
+  img.src = "/stream.mjpg?t=" + Date.now();
+}
+function showConnect(on) { connectOpen = on; $("connect").style.display = on ? "flex" : "none"; }
+function drawQr(url) {
+  $("camUrl").textContent = url || "노트북이 와이파이에 연결돼 있지 않아요";
+  $("qr").innerHTML = "";
+  if (!url) { $("qr").style.display = "none"; return; }
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(url);
+    qr.make();
+    $("qr").innerHTML = qr.createSvgTag(5, 8);
+    $("qr").style.display = "";
+  } catch { $("qr").style.display = "none"; }  // 인터넷이 없어 QR 도구를 못 받았으면 주소만 보여 준다
+}
+async function refreshInfo() {  // 와이파이를 바꾸면 노트북 주소가 바뀌므로 QR을 따라 바꾼다
+  try {
+    info = await (await fetch("/info", { cache: "no-store" })).json();
+    const urls = info.cam_urls || [], key = urls.join("|");
+    if (key !== lastUrls) {
+      lastUrls = key;
+      $("camSel").style.display = urls.length > 1 ? "" : "none";
+      $("camSel").innerHTML = urls.map((u) => `<option value="${u}">${new URL(u).hostname}</option>`).join("");
+      drawQr(urls[0] || "");
+    }
+  } catch { /* 다음에 다시 */ }
+}
+$("showConnect").onclick = () => showConnect(!connectOpen);
+$("connectClose").onclick = () => { connectClosedByUser = true; showConnect(false); };
+$("camSel").onchange = () => drawQr($("camSel").value);
+
+async function poll() {
+  try {
+    const st = await (await fetch("/status", { cache: "no-store" })).json();
+    const live = st.seq > 0 && st.age !== null && st.age <= 3;
+    if (st.seq > 0 && !seen) { seen = true; $("cam").style.display = "block"; }
+    $("st1").classList.toggle("done", live && !st.test);
+    $("camState").textContent = st.seq === 0 ? "휴대폰을 기다리는 중"
+      : !live ? `영상이 끊겼어요 · ${Math.round(st.age)}초 전`
+      : st.test ? `시험 영상 표시 중 · ${st.fps.toFixed(0)}장/초 (휴대폰 연결 전)`
+      : `연결됨 · ${st.source} · ${st.fps.toFixed(0)}장/초`;
+    $("stale").style.display = seen && !live ? "block" : "none";
+    $("stale").textContent = seen && !live ? `휴대폰 영상이 끊겼어요 · ${Math.round(st.age)}초 전` : "";
+    if (live && !st.test && connectOpen) showConnect(false);
+    if (st.seq === 0 && !connectOpen && !connectClosedByUser) showConnect(true);
+  } catch { $("camState").textContent = "분할 화면 서버가 꺼졌어요(server.py를 다시 실행)"; }
+  setTimeout(poll, 1000);
+}
+
+// ---------- 녹화: 이 탭을 그대로 찍어 파일로 저장(초당 60장)
+let rec = null, recStream = null, chunks = [], recStart = 0, recTimer = 0, recFps = 0;
+const stamp = () => { const d = new Date(); return `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`; };
+const mmss = (s) => `${p2(Math.floor(s / 60))}:${p2(Math.floor(s % 60))}`;
+async function startRec() {
+  if (!navigator.mediaDevices?.getDisplayMedia || !window.MediaRecorder) { $("recState").textContent = "이 브라우저는 화면 녹화를 지원하지 않아요(크롬이나 엣지로 열어 주세요)"; return; }
+  try {
+    recStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, displaySurface: "browser" },
+      audio: false, preferCurrentTab: true, selfBrowserSurface: "include" });
+  } catch (e) {
+    $("recState").textContent = e.name === "NotAllowedError" ? "공유를 허용하지 않아 녹화하지 않았어요" : "녹화를 시작하지 못했어요: " + e.message;
+    return;
+  }
+  recFps = Math.round(recStream.getVideoTracks()[0].getSettings().frameRate || 0);
+  const type = ["video/mp4;codecs=avc1.640028", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  rec = new MediaRecorder(recStream, { mimeType: type, videoBitsPerSecond: 12_000_000 });
+  chunks = [];
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = saveRec;
+  recStream.getVideoTracks()[0].addEventListener("ended", stopRec);  // 크롬의 '공유 중지'
+  rec.start(1000);
+  recStart = Date.now();
+  $("rec").textContent = "■ 녹화 끝";
+  $("rec").classList.add("on");
+  document.body.classList.add("clean");
+  layoutLeft();
+  recTimer = setInterval(() => { const t = mmss((Date.now() - recStart) / 1000); $("recState").textContent = `녹화 중 ${t}` + (recFps ? ` · ${recFps}프레임` : ""); document.title = "● 녹화 중 " + t; }, 500);
+}
+function stopRec() {
+  if (!rec) return;
+  if (rec.state !== "inactive") rec.stop();
+  recStream?.getTracks().forEach((t) => t.stop());
+}
+function saveRec() {
+  clearInterval(recTimer);
+  const type = rec.mimeType || "video/webm", ext = type.includes("mp4") ? "mp4" : "webm";
+  const name = `watchmate_demo_${stamp()}.${ext}`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(chunks, { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  const secs = (Date.now() - recStart) / 1000;
+  rec = null; recStream = null; chunks = [];
+  $("rec").textContent = "● 녹화 시작";
+  $("rec").classList.remove("on");
+  $("recState").textContent = `저장했어요: ${name} (${mmss(secs)}` + (recFps ? `, ${recFps}프레임` : "") + ", 다운로드 폴더)";
+  document.title = "와치메이트 시연 화면";
+  document.body.classList.remove("clean");
+  layoutLeft();
+}
+$("rec").onclick = () => (rec ? stopRec() : startRec());
+$("hide").onclick = () => { document.body.classList.add("clean"); layoutLeft(); };
+addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "h" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { document.body.classList.toggle("clean"); layoutLeft(); }
+});
+addEventListener("beforeunload", (e) => { if (rec) { e.preventDefault(); e.returnValue = ""; } });
+
+// ---------- 시작
+setInterval(() => { const d = new Date(); $("clock").textContent = `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; }, 250);
+(async () => {
+  $("leftMode").value = saved("demo.left", "demo");
+  $("siteW").value = saved("demo.siteW", "1280");
+  $("fit").value = saved("demo.fit", "contain");
+  $("words").value = saved("demo.words", "who");
+  $("view").value = saved("demo.view", "3d");
+  applyView();
+  $("cam").style.objectFit = $("fit").value;
+  $("capsOn").checked = saved("demo.caps", "1") === "1";
+  $("truthOn").checked = saved("demo.truth", "1") === "1";
+  $("eventsOn").checked = saved("demo.events", "1") === "1";
+  $("swayOn").checked = saved("demo.sway", "1") === "1";
+  document.body.classList.toggle("nocaps", !$("capsOn").checked);
+  await refreshInfo();
+  setInterval(refreshInfo, 4000);
+  try { const d = await (await fetch("/live", { cache: "no-store" })).json(); $("dataMode").value = d.mode === "replay" ? "replay" : "live"; } catch { /* 기본값 */ }
+  layoutLeft();
+  await openSite(saved("demo.site", info.site));
+  startStream();
+  poll();
+  pollLive();
+})();
+</script>
+
+<!-- 3D 평면도: 브라우저 안에서 바로 그린다(three.js를 인터넷으로 받는다. 못 받으면 위의 2D 평면도로 보인다) -->
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+const host = document.getElementById("plan3d"), W = 736, H = 537;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(W, H);
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0d1014, 30, 62);
+const camera = new THREE.PerspectiveCamera(31, W / H, 0.1, 200);
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0b0d10, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(8, 18, 12);
+scene.add(sun);
+
+// 평면도 좌표(미터, y가 북쪽) → 3D(x 동쪽, y 높이, z 남쪽)
+let CX = (CROP.x0 + CROP.x1) / 2, CY = (CROP.y0 + CROP.y1) / 2, CAMK = 1;  // CAMK: 도면이 넓으면 카메라를 그만큼 뒤로
+const V = (x, y, h = 0) => new THREE.Vector3(x - CX, h, CY - y);
+const COL = { detected: 0xff6b4a, possible: 0xf5b83d, not_detected: 0x2dd4a7 }, IDLE = 0x55607a, ACCENT = 0x4c9dff;
+const root = new THREE.Group();
+scene.add(root);
+let zones3 = {}, labels = [], beams = [], waves = [], tx3 = null;
+
+function floor(x0, x1, y0, y1, color, h = 0.05, lift = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, h, y1 - y0), new THREE.MeshStandardMaterial({ color, roughness: 0.95 }));
+  m.position.copy(V((x0 + x1) / 2, (y0 + y1) / 2, lift + h / 2));
+  root.add(m);
+  return m;
+}
+function volume(x0, x1, y0, y1, h, color, fill, edge) {  // 반투명한 방 부피와 밝은 모서리(홀로그램 느낌)
+  const geo = new THREE.BoxGeometry(x1 - x0 - 0.06, h, y1 - y0 - 0.06);
+  const fillMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: fill, side: THREE.DoubleSide, depthWrite: false });
+  const box = new THREE.Mesh(geo, fillMat);
+  const edgeMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: edge });
+  const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat);
+  for (const o of [box, lines]) { o.position.copy(V((x0 + x1) / 2, (y0 + y1) / 2, h / 2 + 0.05)); root.add(o); }
+  return { fillMat, edgeMat };
+}
+function ring(inner, outer, color, opacity) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 64),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  m.rotation.x = -Math.PI / 2;
+  root.add(m);
+  return m;
+}
+function label(html, cls, pos) {
+  const d = document.createElement("div");
+  d.className = "l3 " + cls;
+  d.innerHTML = html;
+  host.appendChild(d);
+  const l = { el: d, pos };
+  labels.push(l);
+  return l;
+}
+
+function build(zones, nodes) {
+  root.clear();
+  CX = (CROP.x0 + CROP.x1) / 2; CY = (CROP.y0 + CROP.y1) / 2;
+  CAMK = Math.max((CROP.x1 - CROP.x0) / 18.48, (CROP.y1 - CROP.y0) / 13.44);
+  scene.fog.near = 30 * CAMK; scene.fog.far = 62 * CAMK;
+  for (const l of labels) l.el.remove();
+  zones3 = {}; labels = []; beams = []; waves = []; tx3 = null;
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(90, 70), new THREE.MeshStandardMaterial({ color: 0x0e1115, roughness: 1 }));
+  base.rotation.x = -Math.PI / 2;
+  base.position.y = -0.02;
+  root.add(base);
+  const grid = new THREE.GridHelper(80, 80, 0x212a36, 0x171d26);
+  grid.position.y = 0.001;
+  root.add(grid);
+  for (const [x0, x1, y0, y1] of CORRIDORS) floor(x0, x1, y0, y1, 0x141920, 0.04);
+  const zoneNames = new Set(zones.map((z) => z.name.replace("호", "")));
+  for (const [x0, x1, y0, y1, name] of ROOMS) {
+    floor(x0, x1, y0, y1, 0x1a2029);
+    if (!zoneNames.has(name)) volume(x0, x1, y0, y1, 0.8, 0x64748b, 0.04, 0.5);
+  }
+  const txNode = nodes.find((n) => n.role === "tx" && hasXY(n));
+  if (txNode) {
+    const [mx, my] = nodeXY(txNode);
+    tx3 = V(mx, my, 0.95);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.2, 24, 16), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: ACCENT, emissiveIntensity: 1.6 }));
+    orb.position.copy(tx3);
+    root.add(orb);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.95, 8), new THREE.MeshBasicMaterial({ color: 0x6f7b8f }));
+    pole.position.copy(V(mx, my, 0.475));
+    root.add(pole);
+    for (let i = 0; i < 5; i++) { const r = ring(0.985, 1.0, ACCENT, 0.5); r.position.copy(V(mx, my, 0.1)); waves.push(r); }  // 바닥으로 퍼지는 전파
+  }
+  for (const z of zones) {
+    const R = zoneRect(z);
+    if (!R) continue;
+    const [x0, x1, y0, y1] = R, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 - 0.1, y1 - y0 - 0.1),
+      new THREE.MeshBasicMaterial({ color: IDLE, transparent: true, opacity: 0.06, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.copy(V(mx, my, 0.075));
+    root.add(glow);
+    const vol = volume(x0, x1, y0, y1, 1.5, IDLE, 0.05, 0.9);
+    // 사람 모양(위치는 방 가운데로 표시한다. 방 안 어디인지는 재지 않는다)
+    const who = new THREE.Group();
+    const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: COL.detected, emissiveIntensity: 0.85, roughness: 0.4 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.72, 6, 14), skin);
+    body.position.y = 0.66;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 14), skin);
+    head.position.y = 1.42;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 3.4, 28, 1, true),
+      new THREE.MeshBasicMaterial({ color: COL.detected, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    beam.position.y = 1.7;
+    who.add(body, head, beam);
+    who.position.copy(V(mx, my, 0.06));
+    who.scale.setScalar(0.001);
+    root.add(who);
+    const rings = [0, 1, 2].map(() => { const r = ring(0.93, 1.0, COL.detected, 0); r.position.copy(V(mx, my, 0.1)); return r; });
+    const flat = y1 - y0 < 3;  // 복도처럼 납작한 구역은 이름표를 서쪽 끝에 둬서 다른 이름표와 겹치지 않게 한다
+    const lab = label(`<b>${z.name}</b><span></span>`, "", V(flat ? x0 + 1.5 : mx, my, flat ? 1.7 : 2.0));
+    const zr = { state: "idle", cur: new THREE.Color(IDLE), glow, vol, who, beam, rings, lab, k: 0, reach: Math.min(x1 - x0, y1 - y0) * 0.5, op: 0.06 };
+    zones3[z.id] = zr;
+    const rxNode = nodes.find((n) => n.role === "rx" && n.zone_id === z.id && hasXY(n));
+    if (rxNode) {
+      const [rx, ry] = nodeXY(rxNode), p = V(rx, ry, 0.95);
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 12), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.5 }));
+      orb.position.copy(p);
+      root.add(orb);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.95, 8), new THREE.MeshBasicMaterial({ color: 0x6f7b8f }));
+      pole.position.copy(V(rx, ry, 0.475));
+      root.add(pole);
+      if (tx3) {
+        const mat = new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.45 });
+        root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([tx3, p]), mat));
+        const dots = [0, 1, 2, 3].map(() => { const d = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), new THREE.MeshBasicMaterial({ color: ACCENT })); root.add(d); return d; });
+        beams.push({ from: tx3, to: p, mat, dots, zone: zr });
+      }
+    }
+  }
+}
+
+function update(zones, wordFn) {
+  for (const z of zones || []) {
+    const zr = zones3[z.id];
+    if (!zr) continue;
+    zr.state = z.state;
+    zr.lab.el.className = "l3 s-" + z.state;
+    zr.lab.el.lastElementChild.textContent = wordFn(z.state);
+  }
+}
+
+const tmp = new THREE.Vector3(), tmpC = new THREE.Color();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!api.active) return;
+  const t = now / 1000;
+  const th = 0.38 + (document.getElementById("swayOn").checked ? 0.2 * Math.sin(t * 0.21) : 0);  // 시점이 천천히 좌우로 돈다(2번에서 끌 수 있다)
+  camera.position.set(17.5 * CAMK * Math.sin(th) + 0.4, 13.2 * CAMK, 17.5 * CAMK * Math.cos(th) + 0.6);
+  camera.lookAt(0.4, 0.2, 0.2);
+  waves.forEach((r, i) => {
+    const ph = (t * 0.22 + i / waves.length) % 1;
+    r.scale.setScalar(0.3 + ph * 13);
+    r.material.opacity = 0.55 * (1 - ph) * (1 - ph);
+  });
+  for (const id in zones3) {
+    const z = zones3[id], on = z.state === "detected";
+    z.cur.lerp(tmpC.setHex(COL[z.state] ?? IDLE), 0.07);
+    const target = on ? 0.5 + 0.12 * Math.sin(t * 3.2) : z.state === "possible" ? 0.32 : z.state === "not_detected" ? 0.17 : 0.06;
+    z.op += (target - z.op) * 0.08;
+    z.glow.material.color.copy(z.cur);
+    z.glow.material.opacity = z.op;
+    z.vol.fillMat.color.copy(z.cur);
+    z.vol.fillMat.opacity = 0.04 + z.op * 0.18;
+    z.vol.edgeMat.color.copy(z.cur);
+    z.k += ((on ? 1 : 0) - z.k) * 0.09;
+    z.who.scale.setScalar(Math.max(0.001, z.k * 1.1));
+    z.beam.material.opacity = 0.1 + 0.05 * Math.sin(t * 2.4);
+    z.rings.forEach((r, i) => {
+      const ph = (t * 0.45 + i / 3) % 1;
+      r.scale.setScalar(0.25 + ph * z.reach);
+      r.material.opacity = z.k * 0.75 * (1 - ph);
+    });
+  }
+  for (const b of beams) {
+    b.mat.color.copy(b.zone.cur);
+    b.mat.opacity = b.zone.state === "detected" ? 0.9 : 0.45;
+    b.dots.forEach((d, i) => { d.position.lerpVectors(b.from, b.to, (t * 0.55 + i / b.dots.length) % 1); d.material.color.copy(b.zone.cur); });
+  }
+  renderer.render(scene, camera);
+  for (const l of labels) {
+    tmp.copy(l.pos).project(camera);
+    l.el.style.transform = `translate(${((tmp.x * 0.5 + 0.5) * W).toFixed(1)}px, ${((-tmp.y * 0.5 + 0.5) * H).toFixed(1)}px) translate(-50%, -100%)`;
+  }
+}
+const api = { build, update, active: false };
+window.demo3d = api;
+if (lastLive && lastLive.zones) { build(lastLive.zones, lastLive.nodes || []); update(lastLive.zones, word); }
+applyView();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

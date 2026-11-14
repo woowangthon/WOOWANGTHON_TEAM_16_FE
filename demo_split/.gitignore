@@ -1,0 +1,4 @@
+cert/
+versions/
+__pycache__/
+*.tmp
