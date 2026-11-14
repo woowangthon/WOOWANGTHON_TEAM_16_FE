@@ -18,6 +18,12 @@ export function secondsSince(iso: string | null | undefined, now: number): numbe
   return Number.isFinite(t) ? Math.max(0, (now - t) / 1000) : null;
 }
 
+// 녹화 안의 시각을 0:53처럼 적는다
+export function mmss(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 export function duration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s}초`;

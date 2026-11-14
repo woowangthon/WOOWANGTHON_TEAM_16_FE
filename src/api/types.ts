@@ -189,6 +189,10 @@ export interface ReplayStatus {
   elapsed?: number;
   duration?: number;
   synthetic?: boolean;
+  speed?: number;
+  // 녹화할 때 실제로 있었던 일(녹화 시작부터 몇 초째인지와 설명)
+  timeline?: { at: number; text: string }[];
+  finished_at?: string;
 }
 
 export interface ModelCard {

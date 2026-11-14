@@ -8,6 +8,7 @@ import GoalTracker from "../components/GoalTracker";
 import { PredLegend, TruthLegend } from "../components/Legends";
 import PlanView, { planBackground, planFromState } from "../components/PlanView";
 import QuickReplay from "../components/QuickReplay";
+import ReplayDemo from "../components/ReplayDemo";
 import SpaceCard from "../components/SpaceCard";
 import { StepCard, type StepStatus } from "../components/Step";
 import Timeline from "../components/Timeline";
@@ -49,6 +50,9 @@ export default function RunPage() {
   const [calSeconds, setCalSeconds] = useState(CAL_RECOMMENDED_S);
   const [showTimeline, setShowTimeline] = useState(false);
   const [acceptedCalId, setAcceptedCalId] = useState<number | null>(null);
+  // 녹화 재생 중에는 보는 사람용 화면을 먼저 보여 준다. 실험자는 아래 단계 화면으로 바꿔 볼 수 있다.
+  const [toolView, setToolView] = useState(false);
+  const [showSteps, setShowSteps] = useState(!IS_DEPLOYED);
 
   const mock = dataMode === "mock";
   const replaying = dataMode === "replay";
@@ -151,10 +155,28 @@ export default function RunPage() {
   const zones = state ? state.zones.slice().sort((a, b) => a.id - b.id) : [];
   const rxByZone = (id: number) => (state?.nodes ?? []).filter((n) => n.role === "rx" && n.zone_id === id);
   const skipped = mock ? "UI 예시라 건너뛰어요" : "녹화 재생 중이라 건너뛰어요";
+  // 배포본을 처음 여는 사람은 보드가 없다. 실험 단계는 접어 두고, 공간을 등록했거나 실험 중이면 펼친다.
+  const stepsOpen = showSteps || mock || replaying || siteReady || detecting || calRunning || !online;
+
+  if (replaying && state && !toolView) {
+    return (
+      <div>
+        <TopBar title="녹화 재생" sub="보드가 없어도 볼 수 있게, 실제 건물에서 녹화한 신호를 서버가 다시 처리해요." />
+        <ReplayDemo state={state} replay={replay} onEnd={endReplay} onToolView={() => setToolView(true)} />
+      </div>
+    );
+  }
 
   return (
     <div>
-      <TopBar title="실험 진행" sub="위에서부터 차례대로 하면 돼요. 끝난 단계는 저절로 '완료'로 바뀌고 다음 단계가 열려요." />
+      <TopBar
+        title={stepsOpen ? "실험 진행" : "와치메이트 써 보기"}
+        sub={
+          stepsOpen
+            ? "위에서부터 차례대로 하면 돼요. 끝난 단계는 저절로 '완료'로 바뀌고 다음 단계가 열려요."
+            : "보드가 없어도 아래에서 실제 측정 녹화를 바로 재생해 볼 수 있어요."
+        }
+      />
 
       <RecordingBanner />
 
@@ -177,6 +199,9 @@ export default function RunPage() {
             {replay?.running && replay.duration ? ` · ${duration(replay.elapsed ?? 0)} / ${duration(replay.duration)}` : ""}
           </span>
           <div className="ml-auto flex gap-2">
+            <Button variant="ghost" onClick={() => setToolView(false)}>
+              시연 화면으로 보기
+            </Button>
             {replay?.running ? (
               <Button disabled={!!busy} onClick={() => void run("재생 멈춤", () => api.stopReplay())}>
                 <Square size={15} /> 재생 멈추기
@@ -191,6 +216,20 @@ export default function RunPage() {
 
       {online && !mock && !replaying && !detecting && !calRunning ? <QuickReplay /> : null}
 
+      {!stepsOpen ? (
+        <button
+          type="button"
+          onClick={() => setShowSteps(true)}
+          className="w-full rounded-2xl bg-white px-5 py-4 text-left ring-1 ring-slate-200 hover:ring-slate-300"
+        >
+          <b className="text-[17px] text-slate-900">보드를 연결해 직접 실험하기</b>
+          <span className="mt-1 block text-sm text-slate-500">
+            ESP32 보드가 있을 때 쓰는 7단계 화면이에요(서버 확인, 공간 등록, 보드 연결, 빈 방 보정, 감지, 실험, 마치기). 눌러서 펼쳐요.
+          </span>
+        </button>
+      ) : null}
+
+      <div className={stepsOpen ? "" : "hidden"}>
       {!mock && !replaying ? (
         <div className="mb-6 rounded-2xl bg-white px-5 py-4 ring-1 ring-slate-200">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -671,6 +710,7 @@ export default function RunPage() {
           }
         />
       </ol>
+      </div>
 
       {!online && !mock && dataMode !== "loading" && !IS_DEPLOYED ? (
         <div className="mt-6">

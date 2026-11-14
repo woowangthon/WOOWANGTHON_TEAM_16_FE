@@ -265,12 +265,15 @@ export default function PlanView({
   nodes,
   mode,
   truths,
+  fit = false,
 }: {
   background: Background;
   zones: PlanZone[];
   nodes: PlanNode[];
   mode: ModelMode;
   truths?: Record<number, Truth>;
+  // 구역과 장치가 있는 부분만 크게 보여 준다(도면 전체에서 구역이 작게 보일 때)
+  fit?: boolean;
 }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const imageBuilding = background.type === "image" ? background.buildingId : null;
@@ -308,14 +311,33 @@ export default function PlanView({
   const layouts = layoutZones(zones, nodeBoxes, obstacles, mode, truths, W, H, px, py, m);
   const zoneNames = zones.map((z) => z.name);
 
+  // 보여 줄 범위. fit이면 구역·장치를 둘러싼 상자에 여백을 두고, 너무 길쭉하지 않게 가로를 넓힌다.
+  let view = { x: 0, y: 0, w: W, h: H };
+  if (fit && zones.length) {
+    const xs = [...zones.flatMap((z) => z.polygon.map((p) => px(p[0]))), ...nodePts.map((n) => n.x)];
+    const ys = [...zones.flatMap((z) => z.polygon.map((p) => py(p[1]))), ...nodePts.map((n) => n.y)];
+    const pad = u * 1.6;
+    let x0 = Math.min(...xs) - pad;
+    let x1 = Math.max(...xs) + pad;
+    const y0 = Math.min(...ys) - pad;
+    const y1 = Math.max(...ys) + pad;
+    const minW = (y1 - y0) / 0.9;
+    if (x1 - x0 < minW) {
+      const c = (x0 + x1) / 2;
+      x0 = c - minW / 2;
+      x1 = c + minW / 2;
+    }
+    view = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="평면도 위 구역별 상태">
+    <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} className="block h-auto w-full" role="img" aria-label="평면도 위 구역별 상태">
       <defs>
         <pattern id="plan-hatch" width={u * 0.5} height={u * 0.5} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2={u * 0.5} stroke="#94a3b8" strokeWidth={u * 0.08} />
         </pattern>
       </defs>
-      <rect x="0" y="0" width={W} height={H} fill="#ffffff" />
+      <rect x={view.x} y={view.y} width={view.w} height={view.h} fill="#ffffff" />
 
       {background.type === "site" ? (
         <g>

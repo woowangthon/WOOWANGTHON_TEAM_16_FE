@@ -14,7 +14,9 @@ export function ModeBadges() {
         ? { text: "실시간 · 센서 데이터", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" }
         : dataMode === "replay"
           ? {
-              text: replay?.synthetic ? "기록 재생 · 합성 신호(개발용)" : "기록 재생 · 녹화 데이터",
+              text:
+                (replay?.synthetic ? "기록 재생 · 합성 신호(개발용)" : "기록 재생 · 녹화 데이터") +
+                (replay?.speed && replay.speed > 1 ? ` · ${replay.speed}배속` : ""),
               cls: "bg-violet-50 text-violet-700 ring-violet-200",
               dot: "bg-violet-500",
             }
