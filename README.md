@@ -1,31 +1,47 @@
-# 와치메이트 프론트엔드 (Wi-Fi 기척 실험 화면)
+# 와치메이트 프론트엔드 (WOOWANGTHON_TEAM_16_FE)
 
-AI 우왕톤 2026 16팀 와치메이트의 FE 저장소예요(WOOWANGTHON_TEAM_16_FE).
+와치메이트는 불이 난 건물에서 문을 열기 전에, 와이파이 신호만으로 방 안의 기척을 지휘관에게 알려 주는 서비스예요.
+카메라 없이, 빈 방일 때의 신호와 지금 신호를 비교해 구역마다 상태를 보여 줘요. 2026 AI 우왕톤 16팀 출품작이에요.
 
-`watchmate-be`(FastAPI) 서버에 붙는 실험용 화면이에요. 실측할 때는 화면 동기화를 지원하는 백엔드와 함께 실행해요.
+이 저장소에는 화면이 들어 있어요. 판정 서버와 AI, 보드 펌웨어는 [WOOWANGTHON_TEAM_16_BE](https://github.com/woowangthon/WOOWANGTHON_TEAM_16_BE)에, 공개 데이터 시험은 [WOOWANGTHON_TEAM_16_AI](https://github.com/woowangthon/WOOWANGTHON_TEAM_16_AI)에 있어요.
+
+<img src="docs/demo-screen.png" alt="시연 화면. 106호에 사람이 있을 때 106호 구역만 빨갛게 표시된다" width="420">
+
+시연 영상의 한 장면이에요(실제 건물 1층, 사람이 106호 안에 있을 때). 영상은 문구를 바꾸기 전에 찍어서 다른 구역이 '비어 있음'으로 보여요. 지금 코드는 '감지 안 됨'으로 표시해요. 가만히 누운 사람은 놓칠 수 있어서, 사람이 없다는 뜻으로 읽히지 않게 바꿨어요.
+
+## 이 저장소에 있는 것
+
+| 폴더 | 내용 |
+|---|---|
+| `src/` | 실험 화면(React). 보드 연결부터 빈 방 보정, 감지, 기록까지 한 페이지에서 진행해요 |
+| `demo_split/` | 시연 영상용 분할 화면. 왼쪽에 실시간 판정(3D 도면), 오른쪽에 휴대폰 카메라를 나란히 띄워 그대로 녹화해요. 쓰는 법은 [demo_split/README.md](demo_split/README.md) |
+| `scripts/` | 현장 측정 도우미. 화면과 녹화를 맞추는 `record_live.py`, 장면별로 다시 채점하는 `judge_by_scene.py`, 수집기를 켜는 `start_collector.py` |
+| `tests/` | 측정 흐름 시험(보정 다시 하기, 보드 재시작) |
+
+실험 화면은 세 부분이에요.
 
 - **실험 진행** (첫 화면, 한 페이지): 1~7단계를 위에서부터 차례대로 해요. 단계마다 '하기 전에 → 버튼 → 누른 뒤에'를 적어 두었고, 서버 상태를 보고 끝난 단계는 저절로 '완료'가 되며 다음 단계가 열려요.
 - **기록**: 실제 상태별 일치·오탐·미탐 건수, 반응 지연, CSV 내보내기
 - **고급 설정**: 보고 있는 공간 바꾸기, 수신기 토큰 다시 발급, 수집기 서버 주소, 녹화 재생, UI 예시 전환
 
-- **시연 영상용 분할 화면** (`demo_split/`): 왼쪽에 실시간 판정(3D 도면), 오른쪽에 휴대폰 카메라를 나란히 띄우고 그대로 녹화해요. 이 화면과는 따로 도는 파이썬 프로그램이에요. 쓰는 법은 `demo_split/README.md`.
+## 쓴 도구
+
+React 18, TypeScript, Vite, Tailwind CSS로 만들었어요. 시연용 분할 화면은 파이썬 표준 라이브러리 서버와 three.js(3D 도면)를 써요.
 
 ## 실행
 
-Node 20 이상이 필요해요(이 PC에는 Node 26 설치됨). 새 PowerShell 창에서:
+Node 20 이상이 필요해요. 이 저장소를 받은 폴더에서:
 
 ```powershell
-cd C:\wm\watchmate-fe
 npm install
 npm run dev
 ```
 
 브라우저에서 http://localhost:5173 을 열어요. `/api` 요청은 개발 서버가 `127.0.0.1:8000`(백엔드)으로 넘겨요.
 
-백엔드는 따로 켜요.
+백엔드는 [BE 저장소](https://github.com/woowangthon/WOOWANGTHON_TEAM_16_BE)를 받은 폴더에서 따로 켜요. 가상 환경을 만드는 방법은 BE README의 "로컬 실행"에 있어요.
 
 ```powershell
-cd C:\wm\watchmate-be
 .\.venv\Scripts\python -m uvicorn app.main:app --port 8000
 ```
 
