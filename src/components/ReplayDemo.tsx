@@ -1,5 +1,5 @@
 import { RotateCcw, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { IncidentState, ReplayStatus, ScenarioPublic } from "../api/types";
 import { PRED_CHIP, predLabel, type PredClass } from "../lib/labels";
@@ -20,6 +20,29 @@ interface ScreenEvent {
 }
 
 const LOGGED: PredClass[] = ["present", "maybe", "absent"];
+
+// 입체 도면은 three.js가 필요해서 이 화면을 열 때만 따로 받아 온다
+const Plan3D = lazy(() => import("./Plan3D"));
+
+// 입체 도면을 받아 오지 못하거나 그리다 실패하면 평면 도면으로 돌아간다
+class Plan3DGuard extends Component<{ onFail: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.props.onFail();
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+const LEGEND_3D: [string, string][] = [
+  ["#ff6b4a", "present"],
+  ["#f5b83d", "maybe"],
+  ["#2dd4a7", "absent"],
+];
 
 // 녹화 재생을 보는 사람(보드가 없는 사람)을 위한 화면.
 // 위에는 진행 상황, 가운데에는 도면과 '실제로 있었던 일 · 화면 판정' 대조, 아래에는 구역 카드를 둔다.
@@ -108,6 +131,16 @@ export default function ReplayDemo({
   ].sort((a, b) => a.at - b.at || (a.kind === "truth" ? -1 : 1));
 
   const plan = planFromState(state);
+  const plan2d = <PlanView background={planBackground(state.building)} zones={plan.zones} nodes={plan.nodes} mode={state.mode} fit />;
+  // 도면 보기: 입체(시연 영상과 같은 모습)가 기본이고, 평면으로 바꿀 수 있다
+  const [view3d, setView3d] = useState(true);
+  const [fail3d, setFail3d] = useState(false);
+  const show3d = view3d && !fail3d;
+  const words3d: Record<string, string> = {
+    present: predLabel("detected", state.mode).text,
+    maybe: predLabel("possible", state.mode).text,
+    absent: predLabel("not_detected", state.mode).text,
+  };
   const zones = state.zones.slice().sort((a, b) => a.id - b.id);
   const rxByZone = (id: number) => state.nodes.filter((n) => n.role === "rx" && n.zone_id === id);
   const starting = busy === REPLAY_START_LABEL;
@@ -190,14 +223,65 @@ export default function ReplayDemo({
         <section className="rounded-2xl bg-white ring-1 ring-slate-200">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <b className="text-[17px] text-slate-900">도면 · 지금 화면 판정</b>
-            <PredLegend />
+            {fail3d ? null : (
+              <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-sm" role="group" aria-label="도면 보기 방식">
+                {(
+                  [
+                    [true, "입체"],
+                    [false, "평면"],
+                  ] as const
+                ).map(([v, text]) => (
+                  <button
+                    key={text}
+                    type="button"
+                    aria-pressed={view3d === v}
+                    onClick={() => setView3d(v)}
+                    className={`rounded-md px-3 py-1 font-medium ${view3d === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="mx-auto max-w-[560px] p-3">
-            <PlanView background={planBackground(state.building)} zones={plan.zones} nodes={plan.nodes} mode={state.mode} fit />
-          </div>
+          {show3d ? (
+            <div className="p-3">
+              <Plan3DGuard onFail={() => setFail3d(true)}>
+                <Suspense fallback={<div className="mx-auto max-w-[560px]">{plan2d}</div>}>
+                  <Plan3D state={state} mode={state.mode} onFail={() => setFail3d(true)} />
+                </Suspense>
+              </Plan3DGuard>
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-600">
+                {LEGEND_3D.map(([color, cls]) => (
+                  <span key={cls} className="inline-flex items-center gap-1.5">
+                    <i className="size-3 rounded-sm" style={{ background: color }} />
+                    {words3d[cls]}
+                  </span>
+                ))}
+                {state.mode === "person" ? null : <span className="text-slate-400">({rangeText(state.thresholds)})</span>}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="px-5 pt-3">
+                <PredLegend />
+              </div>
+              <div className="mx-auto max-w-[560px] p-3">{plan2d}</div>
+            </>
+          )}
           <p className="border-t border-slate-100 px-5 py-3 text-xs leading-relaxed text-slate-500">
-            {state.mode === "person" ? "사람 모양 = 사람 있음. " : `파형 동그라미 = 빈 방일 때와 신호가 달라짐 · ${rangeText(state.thresholds)}. `}
-            둥근 점은 수신 보드, 빨간 마름모는 송신 보드예요. 구역 단위라 정확한 위치나 인원수는 알 수 없어요.
+            {show3d ? (
+              <>
+                파란 구슬은 송신 보드, 흰 구슬은 수신 보드예요. 솟아오른 빛기둥과 사람 모양은{" "}
+                {state.mode === "person" ? "사람이 있다고 본 구역" : "빈 방일 때보다 신호가 크게 달라진 구역"}을 가리켜요. 구역 가운데에 그릴 뿐, 방 안
+                어디인지나 인원수는 재지 않아요.
+              </>
+            ) : (
+              <>
+                {state.mode === "person" ? "사람 모양 = 사람 있음. " : `파형 동그라미 = 빈 방일 때와 신호가 달라짐 · ${rangeText(state.thresholds)}. `}
+                둥근 점은 수신 보드, 빨간 마름모는 송신 보드예요. 구역 단위라 정확한 위치나 인원수는 알 수 없어요.
+              </>
+            )}
           </p>
         </section>
 
